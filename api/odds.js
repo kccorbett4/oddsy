@@ -31,7 +31,8 @@ export default async function handler(req, res) {
     const remaining = response.headers.get("x-requests-remaining");
     const used = response.headers.get("x-requests-used");
 
-    res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=30");
+    // Cache for 15 minutes on Vercel's edge, serve stale for 10 more min while revalidating
+    res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=600");
     return res.status(200).json({
       games: data,
       requestsRemaining: remaining,

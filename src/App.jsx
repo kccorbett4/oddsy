@@ -584,8 +584,30 @@ export default function App() {
   const [dataSource, setDataSource] = useState("loading");
 
   useEffect(() => {
+    const CACHE_KEY = "oddsy_odds_cache";
+    const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+
     const fetchOdds = async () => {
       setLoading(true);
+
+      // Check localStorage cache first
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const { data: cachedData, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < CACHE_DURATION && cachedData.length > 0) {
+            setGames(cachedData);
+            const vb = findValueBets(cachedData);
+            setValueBets(vb);
+            setParlays(generateParlays(vb));
+            setDataSource("live");
+            setLastRefresh(new Date(timestamp));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
       try {
         const res = await fetch("/api/odds");
         if (!res.ok) throw new Error("API error");
@@ -596,6 +618,8 @@ export default function App() {
           setValueBets(vb);
           setParlays(generateParlays(vb));
           setDataSource("live");
+          // Cache the response
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ data: json.games, timestamp: Date.now() }));
         } else {
           throw new Error("No games returned");
         }
@@ -662,18 +686,7 @@ export default function App() {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div>
-            <h1 style={{
-              margin: 0,
-              fontSize: 28,
-              fontWeight: 900,
-              letterSpacing: "-0.03em",
-              color: "#1a1d23",
-            }}>
-              MyOddsy
-            </h1>
-            <div style={{ fontSize: 12, color: "#8b919a", fontFamily: "'Space Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-              Smart Betting Intelligence
-            </div>
+            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 48, display: "block" }} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
