@@ -40,10 +40,14 @@ export default async function handler(req, res) {
       // If a sport has no events (404), just skip it
     }
 
+    // Filter out games that started more than 6 hours ago (stale data)
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const freshGames = allGames.filter(g => g.commence_time > sixHoursAgo || !g.commence_time);
+
     // Cache for 5 minutes on Vercel's edge, serve stale for 3 more min while revalidating
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=180");
     return res.status(200).json({
-      games: allGames,
+      games: freshGames,
       requestsRemaining: remaining,
       requestsUsed: used,
     });
