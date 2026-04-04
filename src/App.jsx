@@ -345,7 +345,7 @@ const ValueBetCard = ({ bet, index }) => {
         <div style={{ fontSize: 22, fontWeight: 800, color: evColor, fontFamily: "'Space Mono', monospace" }}>
           +{bet.ev}%
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>Expected Value</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4 }}>Expected Value</div>
         <div style={{
           fontSize: 15,
           fontWeight: 700,
@@ -357,8 +357,18 @@ const ValueBetCard = ({ bet, index }) => {
         }}>
           {formatOdds(bet.odds)}
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
-          {bet.book}
+        <div style={{
+          marginTop: 6,
+          padding: "4px 10px",
+          borderRadius: 6,
+          background: "rgba(0,240,255,0.1)",
+          border: "1px solid rgba(0,240,255,0.2)",
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#00f0ff",
+          whiteSpace: "nowrap",
+        }}>
+          Bet on {bet.book}
         </div>
       </div>
     </div>
@@ -944,7 +954,7 @@ export default function App() {
                               {leg.outcome} {leg.point ? `(${leg.point > 0 ? '+' : ''}${leg.point})` : ''}
                             </div>
                             <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {leg.game.away_team} @ {leg.game.home_team}
+                              {leg.game.away_team} @ {leg.game.home_team} · <span style={{ color: "#00f0ff" }}>{leg.book}</span>
                             </div>
                           </div>
                         </div>
