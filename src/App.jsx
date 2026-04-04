@@ -551,14 +551,38 @@ export default function App() {
   const [parlays, setParlays] = useState([]);
   const [parlayKey, setParlayKey] = useState(0);
   const [wagerAmount, setWagerAmount] = useState(25);
+  const [loading, setLoading] = useState(true);
+  const [dataSource, setDataSource] = useState("loading");
 
   useEffect(() => {
-    const data = generateMockOdds();
-    setGames(data);
-    const vb = findValueBets(data);
-    setValueBets(vb);
-    setParlays(generateParlays(vb));
-    setLastRefresh(new Date());
+    const fetchOdds = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/odds");
+        if (!res.ok) throw new Error("API error");
+        const json = await res.json();
+        if (json.games && json.games.length > 0) {
+          setGames(json.games);
+          const vb = findValueBets(json.games);
+          setValueBets(vb);
+          setParlays(generateParlays(vb));
+          setDataSource("live");
+        } else {
+          throw new Error("No games returned");
+        }
+      } catch {
+        // Fall back to mock data
+        const data = generateMockOdds();
+        setGames(data);
+        const vb = findValueBets(data);
+        setValueBets(vb);
+        setParlays(generateParlays(vb));
+        setDataSource("demo");
+      }
+      setLastRefresh(new Date());
+      setLoading(false);
+    };
+    fetchOdds();
   }, [refreshKey]);
 
   useEffect(() => {
@@ -659,11 +683,13 @@ export default function App() {
             </button>
             <div style={{
               width: 8, height: 8, borderRadius: 4,
-              background: "#00ff88",
+              background: dataSource === "live" ? "#00ff88" : dataSource === "demo" ? "#f0c800" : "rgba(255,255,255,0.3)",
               animation: "pulse 2s infinite",
-              boxShadow: "0 0 8px rgba(0,255,136,0.5)",
+              boxShadow: dataSource === "live" ? "0 0 8px rgba(0,255,136,0.5)" : "none",
             }} />
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "'Space Mono', monospace" }}>LIVE</span>
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "'Space Mono', monospace" }}>
+              {loading ? "..." : dataSource === "live" ? "LIVE" : "DEMO"}
+            </span>
           </div>
         </div>
       </header>
