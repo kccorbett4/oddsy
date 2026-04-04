@@ -11,6 +11,15 @@ const SPORTS = [
 
 const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "PointsBet", "BetRivers"];
 
+const BOOK_URLS = {
+  DraftKings: "https://www.draftkings.com/sportsbook",
+  FanDuel: "https://www.fanduel.com/sportsbook",
+  BetMGM: "https://sports.betmgm.com",
+  Caesars: "https://www.caesars.com/sportsbook-and-casino",
+  PointsBet: "https://www.pointsbet.com",
+  BetRivers: "https://www.betrivers.com",
+};
+
 // Simulated live odds data (structured exactly like The-Odds API response)
 const generateMockOdds = () => {
   const teams = {
@@ -275,9 +284,9 @@ const Pill = ({ active, onClick, children, accent }) => (
     style={{
       padding: "8px 16px",
       borderRadius: 20,
-      border: active ? `1.5px solid ${accent || '#00f0ff'}` : "1.5px solid rgba(255,255,255,0.12)",
-      background: active ? `${accent || '#00f0ff'}15` : "rgba(255,255,255,0.05)",
-      color: active ? (accent || '#00f0ff') : "rgba(255,255,255,0.6)",
+      border: active ? `1.5px solid ${accent || '#1a73e8'}` : "1.5px solid #dde1e6",
+      background: active ? `${accent || '#1a73e8'}12` : "#f5f6f8",
+      color: active ? (accent || '#1a73e8') : "#5f6368",
       fontSize: 14,
       fontWeight: 600,
       cursor: "pointer",
@@ -292,27 +301,28 @@ const Pill = ({ active, onClick, children, accent }) => (
 
 const StatCard = ({ label, value, sub, color }) => (
   <div style={{
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "#fff",
+    border: "1px solid #e2e5ea",
     borderRadius: 14,
     padding: "18px 20px",
     flex: 1,
-    minWidth: 130,
+    minWidth: 120,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
   }}>
-    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{label}</div>
-    <div style={{ fontSize: 28, fontWeight: 800, color: color || "#fff", marginTop: 6, fontFamily: "'Space Mono', monospace" }}>{value}</div>
-    {sub && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{sub}</div>}
+    <div style={{ fontSize: 11, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{label}</div>
+    <div style={{ fontSize: 24, fontWeight: 800, color: color || "#1a1d23", marginTop: 6, fontFamily: "'Space Mono', monospace" }}>{value}</div>
+    {sub && <div style={{ fontSize: 12, color: "#8b919a", marginTop: 4 }}>{sub}</div>}
   </div>
 );
 
 const ValueBetCard = ({ bet, index }) => {
-  const evColor = parseFloat(bet.ev) > 5 ? "#00ff88" : parseFloat(bet.ev) > 3 ? "#00f0ff" : "#f0c800";
+  const evColor = parseFloat(bet.ev) > 5 ? "#0d9f4f" : parseFloat(bet.ev) > 3 ? "#1a73e8" : "#e8a100";
   const marketLabel = bet.marketType === "h2h" ? "Moneyline" : bet.marketType === "spreads" ? "Spread" : "Total";
 
   return (
     <div style={{
-      background: "linear-gradient(135deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.015) 100%)",
-      border: "1px solid rgba(255,255,255,0.08)",
+      background: "#fff",
+      border: "1px solid #e2e5ea",
       borderLeft: `3px solid ${evColor}`,
       borderRadius: 12,
       padding: "16px 18px",
@@ -321,55 +331,63 @@ const ValueBetCard = ({ bet, index }) => {
       alignItems: "center",
       gap: 14,
       transition: "all 0.2s",
-      cursor: "pointer",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
       animation: `fadeSlideIn 0.4s ease ${index * 0.05}s both`,
     }}
-    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
-    onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.01) 100%)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; }}
+    onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"; }}
+    onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 12, background: "rgba(255,255,255,0.08)", padding: "3px 8px", borderRadius: 4, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: "0.05em" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, background: "#f0f1f3", padding: "3px 8px", borderRadius: 4, color: "#5f6368", fontWeight: 700, letterSpacing: "0.05em" }}>
             {bet.game.sport_title}
           </span>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{formatTime(bet.commence)}</span>
+          <span style={{ fontSize: 12, color: "#8b919a" }}>{formatTime(bet.commence)}</span>
         </div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1d23", marginBottom: 4 }}>
           {bet.outcome} {bet.point ? `(${bet.point > 0 ? '+' : ''}${bet.point})` : ''} — {marketLabel}
         </div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
+        <div style={{ fontSize: 13, color: "#6b7280" }}>
           {bet.game.away_team} @ {bet.game.home_team}
         </div>
       </div>
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
+      <div style={{ textAlign: "right", flexShrink: 0, minWidth: 100 }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: evColor, fontFamily: "'Space Mono', monospace" }}>
           +{bet.ev}%
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4 }}>Expected Value</div>
+        <div style={{ fontSize: 12, color: "#8b919a", marginBottom: 4 }}>Expected Value</div>
         <div style={{
           fontSize: 15,
           fontWeight: 700,
-          color: "#fff",
-          background: "rgba(255,255,255,0.08)",
+          color: "#1a1d23",
+          background: "#f0f1f3",
           padding: "4px 10px",
           borderRadius: 6,
           fontFamily: "'Space Mono', monospace",
         }}>
           {formatOdds(bet.odds)}
         </div>
-        <div style={{
-          marginTop: 6,
-          padding: "4px 10px",
-          borderRadius: 6,
-          background: "rgba(0,240,255,0.1)",
-          border: "1px solid rgba(0,240,255,0.2)",
-          fontSize: 12,
-          fontWeight: 700,
-          color: "#00f0ff",
-          whiteSpace: "nowrap",
-        }}>
-          Bet on {bet.book}
-        </div>
+        <a
+          href={BOOK_URLS[bet.book] || "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-block",
+            marginTop: 6,
+            padding: "5px 10px",
+            borderRadius: 6,
+            background: "#e8f0fe",
+            border: "1px solid #c5d7f5",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#1a73e8",
+            whiteSpace: "nowrap",
+            textDecoration: "none",
+            cursor: "pointer",
+          }}
+        >
+          Bet on {bet.book} →
+        </a>
       </div>
     </div>
   );
@@ -391,17 +409,17 @@ const OddsRow = ({ game }) => {
       gap: 12,
       alignItems: "center",
       padding: "12px 16px",
-      borderBottom: "1px solid rgba(255,255,255,0.04)",
+      borderBottom: "1px solid #f0f1f3",
       fontSize: 13,
     }}>
       <div>
-        <div style={{ fontWeight: 700, color: "#fff", fontSize: 14, marginBottom: 3 }}>{game.away_team}</div>
-        <div style={{ fontWeight: 600, color: "rgba(255,255,255,0.5)", fontSize: 13 }}>@ {game.home_team}</div>
+        <div style={{ fontWeight: 700, color: "#1a1d23", fontSize: 14, marginBottom: 3 }}>{game.away_team}</div>
+        <div style={{ fontWeight: 600, color: "#6b7280", fontSize: 13 }}>@ {game.home_team}</div>
       </div>
       <div style={{ textAlign: "center", minWidth: 50 }}>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 2 }}>TIME</div>
+        <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 2 }}>TIME</div>
         <div style={{
-          color: formatTime(game.commence_time) === "LIVE" ? "#ff4444" : "rgba(255,255,255,0.5)",
+          color: formatTime(game.commence_time) === "LIVE" ? "#dc2626" : "#5f6368",
           fontWeight: 700,
           fontSize: 12,
           fontFamily: "'Space Mono', monospace",
@@ -410,18 +428,18 @@ const OddsRow = ({ game }) => {
         </div>
       </div>
       <div style={{ textAlign: "center", minWidth: 65 }}>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 2 }}>BEST ML</div>
-        <div style={{ color: "#00f0ff", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
+        <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 2 }}>BEST ML</div>
+        <div style={{ color: "#1a73e8", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.away.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>{bestH2H.away.book}</div>
+        <div style={{ fontSize: 9, color: "#8b919a" }}>{bestH2H.away.book}</div>
       </div>
       <div style={{ textAlign: "center", minWidth: 65 }}>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 2 }}>BEST ML</div>
-        <div style={{ color: "#00ff88", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
+        <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 2 }}>BEST ML</div>
+        <div style={{ color: "#0d9f4f", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.home.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>{bestH2H.home.book}</div>
+        <div style={{ fontSize: 9, color: "#8b919a" }}>{bestH2H.home.book}</div>
       </div>
     </div>
   );
@@ -444,36 +462,37 @@ const AlertBuilder = ({ onClose }) => {
   return (
     <div style={{
       position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-      background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)",
+      background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)",
       display: "flex", alignItems: "center", justifyContent: "center",
       zIndex: 1000, padding: 20,
     }}
     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{
-        background: "linear-gradient(180deg, #1a1a2e 0%, #12121f 100%)",
-        border: "1px solid rgba(255,255,255,0.08)",
+        background: "#fff",
+        border: "1px solid #e2e5ea",
         borderRadius: 20,
         padding: 28,
         width: "100%",
         maxWidth: 420,
+        boxShadow: "0 8px 30px rgba(0,0,0,0.15)",
         animation: "fadeSlideIn 0.3s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>Create Alert</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>Create Alert</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#8b919a", fontSize: 20, cursor: "pointer" }}>✕</button>
         </div>
 
         {saved ? (
           <div style={{ textAlign: "center", padding: "40px 0" }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#00ff88" }}>Alert Created!</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>You'll be notified when conditions are met</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#0d9f4f" }}>Alert Created!</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>You'll be notified when conditions are met</div>
           </div>
         ) : (
           <>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Sport</label>
+              <label style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Sport</label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Pill active={alertSport === "any"} onClick={() => setAlertSport("any")}>Any</Pill>
                 {SPORTS.filter(s => s.season).map(s => (
@@ -483,7 +502,7 @@ const AlertBuilder = ({ onClose }) => {
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Alert When</label>
+              <label style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Alert When</label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Pill active={alertType === "ev"} onClick={() => setAlertType("ev")} accent="#00ff88">+EV Bet Found</Pill>
                 <Pill active={alertType === "line"} onClick={() => setAlertType("line")} accent="#f0c800">Line Movement</Pill>
@@ -493,7 +512,7 @@ const AlertBuilder = ({ onClose }) => {
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>
+              <label style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>
                 {alertType === "ev" ? "Minimum EV %" : alertType === "line" ? "Min Points Moved" : alertType === "underdog" ? "Min Odds (e.g. +300)" : "Min Total Shift"}
               </label>
               <input
@@ -503,9 +522,9 @@ const AlertBuilder = ({ onClose }) => {
                   width: "100%",
                   padding: "10px 14px",
                   borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.03)",
-                  color: "#fff",
+                  border: "1px solid #dde1e6",
+                  background: "#f5f6f8",
+                  color: "#1a1d23",
                   fontSize: 15,
                   fontFamily: "'Space Mono', monospace",
                   fontWeight: 700,
@@ -516,7 +535,7 @@ const AlertBuilder = ({ onClose }) => {
             </div>
 
             <div style={{ marginBottom: 24 }}>
-              <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Sportsbook</label>
+              <label style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 8 }}>Sportsbook</label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Pill active={book === "any"} onClick={() => setBook("any")}>Any</Pill>
                 {BOOKS.slice(0, 4).map(b => (
@@ -530,8 +549,8 @@ const AlertBuilder = ({ onClose }) => {
               padding: "13px",
               borderRadius: 12,
               border: "none",
-              background: "linear-gradient(135deg, #00f0ff, #00cc88)",
-              color: "#000",
+              background: "#1a73e8",
+              color: "#fff",
               fontSize: 14,
               fontWeight: 800,
               cursor: "pointer",
@@ -616,10 +635,9 @@ export default function App() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "linear-gradient(180deg, #0a0a14 0%, #0d0d1a 50%, #0a0a14 100%)",
-      color: "#fff",
+      background: "#f5f6f8",
+      color: "#1a1d23",
       fontFamily: "'DM Sans', sans-serif",
-      overflow: "hidden",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap');
@@ -631,32 +649,15 @@ export default function App() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-        input::placeholder { color: rgba(255,255,255,0.2); }
+        * { box-sizing: border-box; }
+        input::placeholder { color: #aab0b8; }
       `}</style>
-
-      {/* Ambient glow */}
-      <div style={{
-        position: "fixed", top: -200, right: -200, width: 500, height: 500,
-        background: "radial-gradient(circle, rgba(0,240,255,0.03) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
-      <div style={{
-        position: "fixed", bottom: -200, left: -200, width: 500, height: 500,
-        background: "radial-gradient(circle, rgba(0,255,136,0.02) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
 
       {/* Header */}
       <header style={{
         padding: "16px 20px 0",
+        background: "#fff",
+        borderBottom: "1px solid #e2e5ea",
         animation: "fadeSlideIn 0.5s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -666,13 +667,11 @@ export default function App() {
               fontSize: 28,
               fontWeight: 900,
               letterSpacing: "-0.03em",
-              background: "linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.7) 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
+              color: "#1a1d23",
             }}>
               MyOddsy
             </h1>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "'Space Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            <div style={{ fontSize: 12, color: "#8b919a", fontFamily: "'Space Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase" }}>
               Smart Betting Intelligence
             </div>
           </div>
@@ -680,11 +679,11 @@ export default function App() {
             <button
               onClick={() => setRefreshKey(k => k + 1)}
               style={{
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "#f0f1f3",
+                border: "1px solid #dde1e6",
                 borderRadius: 10,
                 padding: "8px 12px",
-                color: "rgba(255,255,255,0.5)",
+                color: "#5f6368",
                 cursor: "pointer",
                 fontSize: 14,
               }}
@@ -693,11 +692,11 @@ export default function App() {
             </button>
             <div style={{
               width: 8, height: 8, borderRadius: 4,
-              background: dataSource === "live" ? "#00ff88" : dataSource === "demo" ? "#f0c800" : "rgba(255,255,255,0.3)",
+              background: dataSource === "live" ? "#0d9f4f" : dataSource === "demo" ? "#e8a100" : "#ccc",
               animation: "pulse 2s infinite",
-              boxShadow: dataSource === "live" ? "0 0 8px rgba(0,255,136,0.5)" : "none",
+              boxShadow: dataSource === "live" ? "0 0 6px rgba(13,159,79,0.4)" : "none",
             }} />
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "'Space Mono', monospace" }}>
+            <span style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
               {loading ? "..." : dataSource === "live" ? "LIVE" : "DEMO"}
             </span>
           </div>
@@ -708,8 +707,9 @@ export default function App() {
       <nav style={{
         display: "flex",
         gap: 0,
-        padding: "12px 20px 0",
-        borderBottom: "1px solid rgba(255,255,255,0.04)",
+        padding: "0 20px",
+        background: "#fff",
+        borderBottom: "1px solid #e2e5ea",
       }}>
         {[
           { id: "value", label: "Value Bets", icon: "⚡" },
@@ -722,11 +722,11 @@ export default function App() {
             onClick={() => setActiveTab(tab.id)}
             style={{
               flex: 1,
-              padding: "10px 0",
+              padding: "12px 0",
               border: "none",
-              borderBottom: activeTab === tab.id ? "2px solid #00f0ff" : "2px solid transparent",
+              borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
               background: "none",
-              color: activeTab === tab.id ? "#fff" : "rgba(255,255,255,0.3)",
+              color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
               fontSize: 14,
               fontWeight: 700,
               cursor: "pointer",
@@ -755,24 +755,24 @@ export default function App() {
       </div>
 
       {/* Content */}
-      <div style={{ padding: "0 20px 100px", animation: "fadeSlideIn 0.5s ease 0.1s both" }}>
+      <div style={{ padding: "0 20px 100px" }}>
 
         {/* ── VALUE BETS TAB ── */}
         {activeTab === "value" && (
           <>
             {/* How it works explainer */}
             <div style={{
-              background: "linear-gradient(135deg, rgba(0,240,255,0.05) 0%, rgba(0,255,136,0.03) 100%)",
-              border: "1px solid rgba(0,240,255,0.1)",
+              background: "#e8f0fe",
+              border: "1px solid #c5d7f5",
               borderRadius: 14,
               padding: "16px 18px",
               marginBottom: 18,
             }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 6 }}>How We Find Value Bets</div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
-                We compare odds from <strong style={{ color: "rgba(255,255,255,0.7)" }}>6 sportsbooks</strong> for every game.
-                When one book's odds are better than the average, that's a <strong style={{ color: "#00ff88" }}>+EV (positive expected value)</strong> bet —
-                meaning the payout is higher than the true probability suggests. The higher the <strong style={{ color: "#00f0ff" }}>EV%</strong>, the bigger the edge.
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 6 }}>How We Find Value Bets</div>
+              <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.7 }}>
+                We compare odds from <strong style={{ color: "#1a1d23" }}>6 sportsbooks</strong> for every game.
+                When one book's odds are better than the average, that's a <strong style={{ color: "#0d9f4f" }}>+EV (positive expected value)</strong> bet —
+                meaning the payout is higher than the true probability suggests. The higher the <strong style={{ color: "#1a73e8" }}>EV%</strong>, the bigger the edge.
               </div>
             </div>
 
@@ -785,10 +785,10 @@ export default function App() {
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
             }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>
                 Top Value Picks
               </h2>
-              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "'Space Mono', monospace" }}>
+              <span style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
                 Updated {lastRefresh.toLocaleTimeString()}
               </span>
             </div>
@@ -798,7 +798,7 @@ export default function App() {
                 <ValueBetCard key={`${bet.game.id}-${bet.outcome}-${bet.book}`} bet={bet} index={i} />
               ))}
               {filteredValue.length === 0 && (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.25)" }}>
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
                   <div style={{ fontSize: 13 }}>No value bets found for this filter</div>
                 </div>
@@ -808,28 +808,31 @@ export default function App() {
             {/* Affiliate CTA */}
             <div style={{
               marginTop: 20,
-              background: "linear-gradient(135deg, rgba(0,240,255,0.08) 0%, rgba(0,204,136,0.05) 100%)",
-              border: "1px solid rgba(0,240,255,0.15)",
+              background: "#fff",
+              border: "1px solid #e2e5ea",
               borderRadius: 14,
               padding: 18,
               textAlign: "center",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
             }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Place these bets on DraftKings</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
-              <button style={{
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Place these bets on DraftKings</div>
+              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
+              <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                display: "inline-block",
                 padding: "10px 28px",
                 borderRadius: 10,
                 border: "none",
-                background: "linear-gradient(135deg, #00f0ff, #00cc88)",
-                color: "#000",
+                background: "#1a73e8",
+                color: "#fff",
                 fontSize: 13,
                 fontWeight: 800,
                 cursor: "pointer",
                 letterSpacing: "0.02em",
+                textDecoration: "none",
               }}>
                 Claim Bonus →
-              </button>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.15)", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+              </a>
+              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
             </div>
           </>
         )}
@@ -839,33 +842,33 @@ export default function App() {
           <>
             {/* Parlay explainer */}
             <div style={{
-              background: "linear-gradient(135deg, rgba(168,85,247,0.06) 0%, rgba(0,240,255,0.03) 100%)",
-              border: "1px solid rgba(168,85,247,0.1)",
+              background: "#f3edff",
+              border: "1px solid #ddd0f5",
               borderRadius: 14,
               padding: "16px 18px",
               marginBottom: 18,
             }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 6 }}>How Our Parlays Work</div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
-                We combine <strong style={{ color: "rgba(255,255,255,0.7)" }}>3 positive-value bets</strong> into parlays using different strategies.
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 6 }}>How Our Parlays Work</div>
+              <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.7 }}>
+                We combine <strong style={{ color: "#1a1d23" }}>3 positive-value bets</strong> into parlays using different strategies.
                 Each leg has a proven edge from our odds comparison. Choose your wager amount below to see potential payouts.
-                Hit <strong style={{ color: "#00f0ff" }}>Regenerate</strong> for fresh combinations.
+                Hit <strong style={{ color: "#1a73e8" }}>Regenerate</strong> for fresh combinations.
               </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>3-Leg Value Parlays</h2>
-                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>Built from the best +EV bets across all sports</div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>3-Leg Value Parlays</h2>
+                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Built from the best +EV bets across all sports</div>
               </div>
               <button
                 onClick={() => setParlayKey(k => k + 1)}
                 style={{
                   padding: "8px 14px",
                   borderRadius: 10,
-                  border: "1px solid rgba(0,240,255,0.2)",
-                  background: "rgba(0,240,255,0.06)",
-                  color: "#00f0ff",
+                  border: "1px solid #c5d7f5",
+                  background: "#e8f0fe",
+                  color: "#1a73e8",
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: "pointer",
@@ -879,16 +882,17 @@ export default function App() {
             {/* Wager input */}
             <div style={{
               display: "flex", alignItems: "center", gap: 10, marginBottom: 18,
-              background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+              background: "#fff", border: "1px solid #e2e5ea",
               borderRadius: 12, padding: "10px 14px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
             }}>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Wager Amount</span>
+              <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>Wager Amount</span>
               <div style={{ display: "flex", gap: 6 }}>
                 {[10, 25, 50, 100].map(amt => (
                   <button key={amt} onClick={() => setWagerAmount(amt)} style={{
                     padding: "5px 12px", borderRadius: 8, border: "none",
-                    background: wagerAmount === amt ? "rgba(0,240,255,0.15)" : "rgba(255,255,255,0.04)",
-                    color: wagerAmount === amt ? "#00f0ff" : "rgba(255,255,255,0.4)",
+                    background: wagerAmount === amt ? "#e8f0fe" : "#f0f1f3",
+                    color: wagerAmount === amt ? "#1a73e8" : "#6b7280",
                     fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Space Mono', monospace",
                   }}>
                     ${amt}
@@ -900,34 +904,35 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {parlays.map((parlay, pi) => (
                 <div key={`${parlay.strategy}-${pi}-${parlayKey}`} style={{
-                  background: "linear-gradient(135deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.008) 100%)",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "#fff",
+                  border: "1px solid #e2e5ea",
                   borderRadius: 16,
                   overflow: "hidden",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
                   animation: `fadeSlideIn 0.4s ease ${pi * 0.08}s both`,
                 }}>
                   {/* Parlay Header */}
                   <div style={{
                     padding: "14px 16px",
-                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    borderBottom: "1px solid #e2e5ea",
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                   }}>
                     <div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#1a1d23" }}>
                         {parlay.icon} {parlay.strategy}
                       </div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2, maxWidth: 240 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, maxWidth: 240 }}>
                         {parlay.desc}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{
                         fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace",
-                        color: parseFloat(parlay.parlayEV) > 5 ? "#00ff88" : "#00f0ff",
+                        color: parseFloat(parlay.parlayEV) > 5 ? "#0d9f4f" : "#1a73e8",
                       }}>
                         {formatOdds(parlay.combinedOdds)}
                       </div>
-                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>combined odds</div>
+                      <div style={{ fontSize: 10, color: "#8b919a" }}>combined odds</div>
                     </div>
                   </div>
 
@@ -938,39 +943,39 @@ export default function App() {
                     return (
                       <div key={li} style={{
                         padding: "10px 16px",
-                        borderBottom: li < 2 ? "1px solid rgba(255,255,255,0.03)" : "none",
+                        borderBottom: li < 2 ? "1px solid #f0f1f3" : "none",
                         display: "flex", justifyContent: "space-between", alignItems: "center",
                       }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                           <div style={{
                             width: 28, height: 28, borderRadius: 8,
-                            background: "rgba(255,255,255,0.04)", display: "flex",
+                            background: "#f0f1f3", display: "flex",
                             alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0,
                           }}>
                             {sportIcon}
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1d23", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {leg.outcome} {leg.point ? `(${leg.point > 0 ? '+' : ''}${leg.point})` : ''}
                             </div>
-                            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {leg.game.away_team} @ {leg.game.home_team} · <span style={{ color: "#00f0ff" }}>{leg.book}</span>
+                            <div style={{ fontSize: 10, color: "#8b919a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {leg.game.away_team} @ {leg.game.home_team} · <span style={{ color: "#1a73e8", fontWeight: 600 }}>{leg.book}</span>
                             </div>
                           </div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <span style={{
                             fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                            background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", fontWeight: 700,
+                            background: "#f0f1f3", color: "#6b7280", fontWeight: 700,
                           }}>{marketLabel}</span>
                           <span style={{
                             fontSize: 14, fontWeight: 800, fontFamily: "'Space Mono', monospace",
-                            color: leg.odds > 0 ? "#00ff88" : "#fff",
+                            color: leg.odds > 0 ? "#0d9f4f" : "#1a1d23",
                           }}>
                             {formatOdds(leg.odds)}
                           </span>
                           <span style={{
-                            fontSize: 10, color: "#00f0ff", fontWeight: 700, fontFamily: "'Space Mono', monospace",
+                            fontSize: 10, color: "#1a73e8", fontWeight: 700, fontFamily: "'Space Mono', monospace",
                           }}>+{leg.ev}%</span>
                         </div>
                       </div>
@@ -980,30 +985,30 @@ export default function App() {
                   {/* Parlay Footer — payout info */}
                   <div style={{
                     padding: "12px 16px",
-                    background: "rgba(0,240,255,0.03)",
-                    borderTop: "1px solid rgba(0,240,255,0.08)",
+                    background: "#f8f9fa",
+                    borderTop: "1px solid #e2e5ea",
                     display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8,
                   }}>
                     <div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Payout</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#00ff88", fontFamily: "'Space Mono', monospace" }}>
+                      <div style={{ fontSize: 9, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Payout</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
                         ${(wagerAmount * (parseFloat(parlay.combinedDecimal) - 1)).toFixed(0)}
                       </div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>on ${wagerAmount} bet</div>
+                      <div style={{ fontSize: 9, color: "#8b919a" }}>on ${wagerAmount} bet</div>
                     </div>
                     <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Parlay EV</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: parseFloat(parlay.parlayEV) > 0 ? "#00f0ff" : "#ff4444", fontFamily: "'Space Mono', monospace" }}>
+                      <div style={{ fontSize: 9, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Parlay EV</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: parseFloat(parlay.parlayEV) > 0 ? "#1a73e8" : "#dc2626", fontFamily: "'Space Mono', monospace" }}>
                         {parseFloat(parlay.parlayEV) > 0 ? "+" : ""}{parlay.parlayEV}%
                       </div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>expected value</div>
+                      <div style={{ fontSize: 9, color: "#8b919a" }}>expected value</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Win Prob</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "rgba(255,255,255,0.7)", fontFamily: "'Space Mono', monospace" }}>
+                      <div style={{ fontSize: 9, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Win Prob</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#4a5568", fontFamily: "'Space Mono', monospace" }}>
                         {parlay.impliedProb}%
                       </div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>estimated</div>
+                      <div style={{ fontSize: 9, color: "#8b919a" }}>estimated</div>
                     </div>
                   </div>
                 </div>
@@ -1013,22 +1018,25 @@ export default function App() {
             {/* Affiliate CTA for parlays */}
             <div style={{
               marginTop: 20,
-              background: "linear-gradient(135deg, rgba(168,85,247,0.1) 0%, rgba(0,240,255,0.05) 100%)",
-              border: "1px solid rgba(168,85,247,0.15)",
+              background: "#fff",
+              border: "1px solid #e2e5ea",
               borderRadius: 14,
               padding: 18,
               textAlign: "center",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
             }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Build these parlays on FanDuel</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 12 }}>New users: Bet $5, Get $200 in bonus bets</div>
-              <button style={{
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Build these parlays on FanDuel</div>
+              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users: Bet $5, Get $200 in bonus bets</div>
+              <a href="https://www.fanduel.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                display: "inline-block",
                 padding: "10px 28px", borderRadius: 10, border: "none",
-                background: "linear-gradient(135deg, #a855f7, #6366f1)",
+                background: "#7c3aed",
                 color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer",
+                textDecoration: "none",
               }}>
                 Build Parlay →
-              </button>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.15)", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+              </a>
+              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
             </div>
 
           </>
@@ -1046,9 +1054,9 @@ export default function App() {
                   width: "100%",
                   padding: "10px 14px",
                   borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  background: "rgba(255,255,255,0.03)",
-                  color: "#fff",
+                  border: "1px solid #dde1e6",
+                  background: "#fff",
+                  color: "#1a1d23",
                   fontSize: 13,
                   fontFamily: "'DM Sans', sans-serif",
                   outline: "none",
@@ -1058,17 +1066,18 @@ export default function App() {
             </div>
 
             <div style={{
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(255,255,255,0.06)",
+              background: "#fff",
+              border: "1px solid #e2e5ea",
               borderRadius: 14,
               overflow: "hidden",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
             }}>
               <div style={{
                 padding: "10px 16px",
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                borderBottom: "1px solid #e2e5ea",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "rgba(255,255,255,0.3)",
+                color: "#8b919a",
                 textTransform: "uppercase",
                 letterSpacing: "0.1em",
                 display: "grid",
@@ -1082,7 +1091,7 @@ export default function App() {
               </div>
               {filteredGames.map(g => <OddsRow key={g.id} game={g} />)}
               {filteredGames.length === 0 && (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.25)", fontSize: 13 }}>
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a", fontSize: 13 }}>
                   No games found
                 </div>
               )}
@@ -1103,8 +1112,8 @@ export default function App() {
                   padding: "13px 28px",
                   borderRadius: 12,
                   border: "none",
-                  background: "linear-gradient(135deg, #00f0ff, #00cc88)",
-                  color: "#000",
+                  background: "#1a73e8",
+                  color: "#fff",
                   fontSize: 14,
                   fontWeight: 800,
                   cursor: "pointer",
@@ -1125,19 +1134,20 @@ export default function App() {
                 { type: "Underdog", sport: "Any", condition: "ML > +300", status: "paused", triggered: "5 hits this week" },
               ].map((alert, i) => (
                 <div key={i} style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "#fff",
+                  border: "1px solid #e2e5ea",
                   borderRadius: 12,
                   padding: "14px 16px",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
                   animation: `fadeSlideIn 0.4s ease ${i * 0.1}s both`,
                 }}>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 2 }}>{alert.type}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{alert.sport} · {alert.condition}</div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 2 }}>{alert.triggered}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23", marginBottom: 2 }}>{alert.type}</div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>{alert.sport} · {alert.condition}</div>
+                    <div style={{ fontSize: 10, color: "#8b919a", marginTop: 2 }}>{alert.triggered}</div>
                   </div>
                   <div style={{
                     padding: "4px 10px",
@@ -1146,9 +1156,9 @@ export default function App() {
                     fontWeight: 700,
                     textTransform: "uppercase",
                     letterSpacing: "0.1em",
-                    background: alert.status === "active" ? "rgba(0,255,136,0.1)" : "rgba(255,255,255,0.04)",
-                    color: alert.status === "active" ? "#00ff88" : "rgba(255,255,255,0.3)",
-                    border: `1px solid ${alert.status === "active" ? "rgba(0,255,136,0.2)" : "rgba(255,255,255,0.06)"}`,
+                    background: alert.status === "active" ? "#ecfdf5" : "#f0f1f3",
+                    color: alert.status === "active" ? "#0d9f4f" : "#8b919a",
+                    border: `1px solid ${alert.status === "active" ? "#a7f3d0" : "#dde1e6"}`,
                   }}>
                     {alert.status}
                   </div>
@@ -1161,11 +1171,11 @@ export default function App() {
               marginTop: 20,
               padding: 16,
               borderRadius: 12,
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(255,255,255,0.04)",
+              background: "#e8f0fe",
+              border: "1px solid #c5d7f5",
             }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>How Alerts Work</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1d23", marginBottom: 8 }}>How Alerts Work</div>
+              <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.6 }}>
                 Set your criteria and we scan odds across 6+ sportsbooks every 60 seconds. When conditions are met, you get a push notification with the bet details and best available line.
               </div>
             </div>
