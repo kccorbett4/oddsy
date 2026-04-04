@@ -579,7 +579,7 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
-  const [activeTab, setActiveTab] = useState("value");
+  const [activeTab, setActiveTab] = useState("scores");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -589,6 +589,7 @@ export default function App() {
   const [wagerAmount, setWagerAmount] = useState(25);
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState("loading");
+  const [liveScores, setLiveScores] = useState([]);
 
   useEffect(() => {
     const CACHE_KEY = "oddsy_odds_cache";
@@ -644,6 +645,23 @@ export default function App() {
     };
     fetchOdds();
   }, [refreshKey]);
+
+  // Fetch live scores
+  useEffect(() => {
+    const fetchScores = async () => {
+      try {
+        const res = await fetch("/api/scores");
+        if (res.ok) {
+          const json = await res.json();
+          if (json.events) setLiveScores(json.events);
+        }
+      } catch {}
+    };
+    fetchScores();
+    // Refresh scores every 2 minutes
+    const interval = setInterval(fetchScores, 120000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (valueBets.length > 0) setParlays(generateParlays(valueBets));
@@ -707,6 +725,7 @@ export default function App() {
         borderBottom: "1px solid #e2e5ea",
       }}>
         {[
+          { id: "scores", label: "Scores", icon: "🏆" },
           { id: "value", label: "Value Bets", icon: "⚡" },
           { id: "parlays", label: "Parlays", icon: "🎰" },
           { id: "odds", label: "Odds", icon: "📊" },
@@ -722,7 +741,7 @@ export default function App() {
               borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
               background: "none",
               color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
-              fontSize: 14,
+              fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
               fontFamily: "'DM Sans', sans-serif",
@@ -751,6 +770,109 @@ export default function App() {
 
       {/* Content */}
       <div style={{ padding: "0 20px 100px" }}>
+
+        {/* ── LIVE SCORES TAB ── */}
+        {activeTab === "scores" && (
+          <>
+            <h2 style={{ margin: "0 0 14px", fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>
+              Live Scores & Today's Games
+            </h2>
+            {liveScores.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🏆</div>
+                <div style={{ fontSize: 14 }}>No games scheduled right now. Check back later!</div>
+              </div>
+            )}
+            {(() => {
+              const sportGroups = {};
+              const filteredScores = activeSport === "all"
+                ? liveScores
+                : liveScores.filter(e => e.sport_key === activeSport);
+              filteredScores.forEach(e => {
+                const sport = SPORTS.find(s => s.id === e.sport_key);
+                const label = sport ? `${sport.icon} ${sport.name}` : e.sport_key;
+                if (!sportGroups[label]) sportGroups[label] = [];
+                sportGroups[label].push(e);
+              });
+              return Object.entries(sportGroups).map(([sportLabel, events]) => (
+                <div key={sportLabel} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#6b7280", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    {sportLabel}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {events.map(event => {
+                      const isLive = event.status.type === "STATUS_IN_PROGRESS";
+                      const isFinal = event.status.type === "STATUS_FINAL";
+                      const isScheduled = event.status.type === "STATUS_SCHEDULED";
+                      return (
+                        <div key={event.id} style={{
+                          background: "#fff",
+                          border: isLive ? "1px solid #dc2626" : "1px solid #e2e5ea",
+                          borderLeft: isLive ? "3px solid #dc2626" : isFinal ? "3px solid #8b919a" : "3px solid #0d9f4f",
+                          borderRadius: 12,
+                          padding: "14px 16px",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                        }}>
+                          {/* Status badge */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                            <span style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "3px 8px",
+                              borderRadius: 4,
+                              background: isLive ? "#fef2f2" : isFinal ? "#f0f1f3" : "#ecfdf5",
+                              color: isLive ? "#dc2626" : isFinal ? "#6b7280" : "#0d9f4f",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                            }}>
+                              {isLive ? (event.status.displayClock ? `LIVE · ${event.status.displayClock}` : "LIVE") : isFinal ? "FINAL" : "UPCOMING"}
+                            </span>
+                            {isScheduled && event.status.detail && (
+                              <span style={{ fontSize: 11, color: "#8b919a" }}>{event.status.detail}</span>
+                            )}
+                          </div>
+                          {/* Teams & Scores */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{
+                                fontSize: 15, fontWeight: 700, marginBottom: 6,
+                                color: isFinal && event.away.score > event.home.score ? "#1a1d23" : isFinal ? "#8b919a" : "#1a1d23",
+                              }}>
+                                {event.away.name}
+                              </div>
+                              <div style={{
+                                fontSize: 15, fontWeight: 700,
+                                color: isFinal && event.home.score > event.away.score ? "#1a1d23" : isFinal ? "#8b919a" : "#1a1d23",
+                              }}>
+                                {event.home.name}
+                              </div>
+                            </div>
+                            {(isLive || isFinal) && (
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{
+                                  fontSize: 22, fontWeight: 800, fontFamily: "'Space Mono', monospace", marginBottom: 4,
+                                  color: isFinal && event.away.score > event.home.score ? "#1a1d23" : isFinal ? "#8b919a" : "#1a1d23",
+                                }}>
+                                  {event.away.score}
+                                </div>
+                                <div style={{
+                                  fontSize: 22, fontWeight: 800, fontFamily: "'Space Mono', monospace",
+                                  color: isFinal && event.home.score > event.away.score ? "#1a1d23" : isFinal ? "#8b919a" : "#1a1d23",
+                                }}>
+                                  {event.home.score}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ));
+            })()}
+          </>
+        )}
 
         {/* ── VALUE BETS TAB ── */}
         {activeTab === "value" && (
