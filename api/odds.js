@@ -44,8 +44,8 @@ export default async function handler(req, res) {
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const freshGames = allGames.filter(g => g.commence_time > sixHoursAgo || !g.commence_time);
 
-    // Cache for 5 minutes on Vercel's edge, serve stale for 3 more min while revalidating
-    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=180");
+    // Cache for 10 minutes on Vercel's edge, serve stale for 5 more min while revalidating
+    res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=300");
     return res.status(200).json({
       games: freshGames,
       requestsRemaining: remaining,

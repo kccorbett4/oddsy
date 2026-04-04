@@ -22,106 +22,6 @@ const BOOK_URLS = {
   BetRivers: "https://www.betrivers.com",
 };
 
-// ── Sharp Plays Tracker (localStorage-based) ────────────
-const TRACKER_KEY = "oddsy_sharp_tracker";
-
-const loadTrackedPlays = () => {
-  try {
-    return JSON.parse(localStorage.getItem(TRACKER_KEY) || "[]");
-  } catch { return []; }
-};
-
-const saveTrackedPlays = (plays) => {
-  localStorage.setItem(TRACKER_KEY, JSON.stringify(plays));
-};
-
-const snapshotSharpPlays = (sharpPlays) => {
-  const existing = loadTrackedPlays();
-  const now = new Date().toISOString();
-
-  sharpPlays.forEach(play => {
-    const id = `${play.game.id}_${play.outcome}_${play.marketType}_${play.point || ""}`;
-    if (existing.find(e => e.id === id)) return; // already tracked
-
-    existing.push({
-      id,
-      gameId: play.game.id,
-      sport: play.game.sport_key,
-      homeTeam: play.game.home_team,
-      awayTeam: play.game.away_team,
-      outcome: play.outcome,
-      marketType: play.marketType,
-      point: play.point,
-      odds: play.odds,
-      book: play.book,
-      ev: play.ev,
-      totalScore: play.totalScore,
-      confidenceLabel: play.confidenceLabel,
-      commence: play.commence,
-      trackedAt: now,
-      result: null, // "win" | "loss" | "push" | null
-      resolvedAt: null,
-    });
-  });
-
-  // Keep last 90 days only
-  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-  const trimmed = existing.filter(e => new Date(e.trackedAt).getTime() > cutoff);
-  saveTrackedPlays(trimmed);
-  return trimmed;
-};
-
-const resolveTrackedPlays = (trackedPlays, liveScores) => {
-  if (!liveScores || liveScores.length === 0) return trackedPlays;
-
-  let changed = false;
-  const updated = trackedPlays.map(play => {
-    if (play.result) return play; // already resolved
-
-    // Find matching score event
-    const homeNorm = play.homeTeam?.toLowerCase();
-    const awayNorm = play.awayTeam?.toLowerCase();
-    const match = liveScores.find(e => {
-      const h = e.home?.name?.toLowerCase() || "";
-      const a = e.away?.name?.toLowerCase() || "";
-      return h.includes(homeNorm) && a.includes(awayNorm);
-    });
-
-    if (!match || match.status.type !== "STATUS_FINAL") return play;
-
-    // Determine result
-    let result = null;
-    const homeScore = match.home.score;
-    const awayScore = match.away.score;
-
-    if (play.marketType === "h2h") {
-      const winnerIsHome = homeScore > awayScore;
-      const pickIsHome = play.outcome === play.homeTeam;
-      if (homeScore === awayScore) result = "push";
-      else result = (winnerIsHome === pickIsHome) ? "win" : "loss";
-    } else if (play.marketType === "spreads" && play.point !== null) {
-      const pickIsHome = play.outcome === play.homeTeam;
-      const adjustedScore = pickIsHome ? homeScore + play.point : awayScore + play.point;
-      const oppScore = pickIsHome ? awayScore : homeScore;
-      if (adjustedScore === oppScore) result = "push";
-      else result = adjustedScore > oppScore ? "win" : "loss";
-    } else if (play.marketType === "totals" && play.point !== null) {
-      const totalScore = homeScore + awayScore;
-      if (totalScore === play.point) result = "push";
-      else if (play.outcome === "Over") result = totalScore > play.point ? "win" : "loss";
-      else result = totalScore < play.point ? "win" : "loss";
-    }
-
-    if (result) {
-      changed = true;
-      return { ...play, result, resolvedAt: new Date().toISOString() };
-    }
-    return play;
-  });
-
-  if (changed) saveTrackedPlays(updated);
-  return updated;
-};
 
 // Calculate implied probability from American odds
 const impliedProb = (odds) => {
@@ -774,7 +674,6 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [liveScores, setLiveScores] = useState([]);
   const [sharpPlays, setSharpPlays] = useState([]);
-  const [trackedPlays, setTrackedPlays] = useState(() => loadTrackedPlays());
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
   const [geoLoaded, setGeoLoaded] = useState(false);
@@ -802,7 +701,7 @@ export default function App() {
 
   useEffect(() => {
     const CACHE_KEY = "oddsy_odds_cache";
-    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
 
     const fetchOdds = async () => {
       setLoading(true);
@@ -886,18 +785,7 @@ export default function App() {
       setParlays(generateParlays(vb));
       setSharpPlays(findSharpPlays(games, liveScores));
     }
-    // Resolve any tracked plays against final scores
-    if (liveScores.length > 0) {
-      setTrackedPlays(prev => resolveTrackedPlays(prev, liveScores));
-    }
   }, [liveScores]);
-
-  // Snapshot sharp plays for tracking when they change
-  useEffect(() => {
-    if (sharpPlays.length > 0) {
-      setTrackedPlays(snapshotSharpPlays(sharpPlays));
-    }
-  }, [sharpPlays]);
 
   useEffect(() => {
     if (valueBets.length > 0) setParlays(generateParlays(valueBets));
@@ -1214,67 +1102,6 @@ export default function App() {
                 <strong style={{ color: "#a0aec0" }}>Sources:</strong> Levitt, S. (2004) "Why are gambling markets organised so differently from financial markets?" <em>The Economic Journal</em> · Humphreys et al. (2013) "Closing line value and the wisdom of the crowd" · Sports Insights database (2007-2023) · Bet Labs Systems (Action Network)
               </div>
             </div>
-
-            {/* Track Record */}
-            {(() => {
-              const resolved = trackedPlays.filter(p => p.result);
-              const wins = resolved.filter(p => p.result === "win").length;
-              const losses = resolved.filter(p => p.result === "loss").length;
-              const pushes = resolved.filter(p => p.result === "push").length;
-              const total = wins + losses;
-              const winPct = total > 0 ? ((wins / total) * 100).toFixed(1) : "—";
-              const pending = trackedPlays.filter(p => !p.result).length;
-
-              return (
-                <div style={{
-                  background: "#fff",
-                  border: "1px solid #e2e5ea",
-                  borderRadius: 14,
-                  padding: "16px 18px",
-                  marginBottom: 18,
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>Sharp Plays Track Record</div>
-                    <span style={{ fontSize: 10, color: "#8b919a" }}>Auto-tracked · Last 90 days</span>
-                  </div>
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                    <div style={{ flex: 1, minWidth: 70, textAlign: "center", background: "#ecfdf5", borderRadius: 10, padding: "10px 8px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>{wins}</div>
-                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>Wins</div>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 70, textAlign: "center", background: "#fef2f2", borderRadius: 10, padding: "10px 8px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: "#dc2626", fontFamily: "'Space Mono', monospace" }}>{losses}</div>
-                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>Losses</div>
-                    </div>
-                    {pushes > 0 && (
-                      <div style={{ flex: 1, minWidth: 70, textAlign: "center", background: "#f0f1f3", borderRadius: 10, padding: "10px 8px" }}>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: "#6b7280", fontFamily: "'Space Mono', monospace" }}>{pushes}</div>
-                        <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>Pushes</div>
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 70, textAlign: "center", background: "#e8f0fe", borderRadius: 10, padding: "10px 8px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>{winPct}{winPct !== "—" ? "%" : ""}</div>
-                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>Win Rate</div>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 70, textAlign: "center", background: "#f5f3ff", borderRadius: 10, padding: "10px 8px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: "#7c3aed", fontFamily: "'Space Mono', monospace" }}>{pending}</div>
-                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>Pending</div>
-                    </div>
-                  </div>
-                  {total === 0 && (
-                    <div style={{ marginTop: 10, fontSize: 11, color: "#8b919a", textAlign: "center" }}>
-                      Picks are automatically tracked as they're shown. Results update when games finish.
-                    </div>
-                  )}
-                  {total > 0 && total < 30 && (
-                    <div style={{ marginTop: 10, fontSize: 11, color: "#8b919a", textAlign: "center" }}>
-                      Small sample size ({total} resolved). More data needed for statistical significance.
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
 
             {/* Stats row */}
             <div style={{ display: "flex", gap: 10, marginBottom: 18, overflowX: "auto" }}>
