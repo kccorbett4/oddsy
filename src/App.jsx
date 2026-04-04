@@ -6,7 +6,9 @@ const SPORTS = [
   { id: "baseball_mlb", name: "MLB", icon: "⚾", season: true },
   { id: "icehockey_nhl", name: "NHL", icon: "🏒", season: true },
   { id: "mma_mixed_martial_arts", name: "MMA", icon: "🥊", season: true },
-  { id: "americanfootball_ncaaf", name: "NCAAF", icon: "🏈", season: false },
+  { id: "basketball_ncaab", name: "NCAAB", icon: "🏀", season: true },
+  { id: "americanfootball_ncaaf", name: "NCAAF", icon: "🏈", season: true },
+  { id: "soccer_usa_mls", name: "MLS", icon: "⚽", season: true },
 ];
 
 const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "Fanatics", "BetRivers"];
@@ -205,7 +207,7 @@ const findValueBets = (games, liveScores) => {
       });
 
       Object.entries(allOutcomes).forEach(([key, outcomes]) => {
-        if (outcomes.length < 3) return;
+        if (outcomes.length < 2) return;
 
         const probs = outcomes.map(o => impliedProb(o.price));
         const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
@@ -216,8 +218,8 @@ const findValueBets = (games, liveScores) => {
           const ev = calcEV(outcome.price, vigFreeProb);
           const edgePercent = ((vigFreeProb - thisProb) / thisProb * 100);
 
-          // Filter: reasonable EV/edge, no extreme long shots
-          if (ev > 2 && edgePercent > 2 && outcome.price < 500 && outcome.price > -500) {
+          // Filter: positive EV with some edge, no extreme long shots
+          if (ev > 0.5 && edgePercent > 0.5 && outcome.price < 600 && outcome.price > -600) {
             valueBets.push({
               game,
               marketType,
@@ -244,7 +246,7 @@ const findValueBets = (games, liveScores) => {
       if (a.isLive !== b.isLive) return a.isLive ? 1 : -1;
       return parseFloat(b.ev) - parseFloat(a.ev);
     })
-    .slice(0, 30);
+    .slice(0, 50);
 };
 
 // Generate 3-leg parlays from undervalued bets across different sports

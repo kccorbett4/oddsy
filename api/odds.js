@@ -15,6 +15,9 @@ export default async function handler(req, res) {
     "baseball_mlb",
     "icehockey_nhl",
     "mma_mixed_martial_arts",
+    "basketball_ncaab",
+    "americanfootball_ncaaf",
+    "soccer_usa_mls",
   ];
 
   try {
