@@ -315,7 +315,7 @@ const findSharpPlays = (games, liveScores) => {
 
           const totalScore = discrepancyScore + underdogScore + divergenceScore + evScore;
 
-          if (totalScore >= 15) {
+          if (totalScore >= 10) {
             // Determine confidence tier
             let confidence, confidenceColor, confidenceLabel;
             if (totalScore >= 55) { confidence = 5; confidenceColor = "#0d9f4f"; confidenceLabel = "Elite"; }
@@ -351,7 +351,7 @@ const findSharpPlays = (games, liveScores) => {
     });
   });
 
-  return plays.sort((a, b) => b.totalScore - a.totalScore).slice(0, 30);
+  return plays.sort((a, b) => b.totalScore - a.totalScore).slice(0, 50);
 };
 
 const formatOdds = (odds) => (odds > 0 ? `+${odds}` : `${odds}`);
@@ -406,7 +406,7 @@ const StatCard = ({ label, value, sub, color }) => (
   </div>
 );
 
-const ValueBetCard = ({ bet, index, restricted }) => {
+const ValueBetCard = ({ bet, index }) => {
   const evColor = parseFloat(bet.ev) > 5 ? "#0d9f4f" : parseFloat(bet.ev) > 3 ? "#1a73e8" : "#e8a100";
   const marketLabel = bet.marketType === "h2h" ? "Moneyline" : bet.marketType === "spreads" ? "Spread" : "Total";
 
@@ -459,7 +459,7 @@ const ValueBetCard = ({ bet, index, restricted }) => {
         }}>
           {formatOdds(bet.odds)}
         </div>
-        {!restricted && <a
+        <a
           href={BOOK_URLS[bet.book] || "#"}
           target="_blank"
           rel="noopener noreferrer"
@@ -478,7 +478,7 @@ const ValueBetCard = ({ bet, index, restricted }) => {
           }}
         >
           Bet on {bet.book} →
-        </a>}
+        </a>
       </div>
     </div>
   );
@@ -663,7 +663,7 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
-  const [activeTab, setActiveTab] = useState("value");
+  const [activeTab, setActiveTab] = useState("sharp");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -842,26 +842,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Restricted state banner */}
-      {isRestricted && (
-        <div style={{
-          background: "#fef3c7",
-          borderBottom: "1px solid #fcd34d",
-          padding: "10px 20px",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 12,
-          color: "#92400e",
-          lineHeight: 1.5,
-        }}>
-          <span style={{ fontSize: 16, flexShrink: 0 }}>&#9888;&#65039;</span>
-          <div>
-            <strong>Sports betting is not currently legal in your state.</strong> MyOddsy is an informational and entertainment platform only. Content on this site does not constitute an offer, solicitation, or encouragement to gamble. Sportsbook links are disabled for your region.
-          </div>
-        </div>
-      )}
-
       {/* Nav Tabs — top bar on desktop only */}
       {!isMobile && (
         <nav style={{
@@ -872,8 +852,8 @@ export default function App() {
           borderBottom: "1px solid #e2e5ea",
         }}>
           {[
-            { id: "value", label: "Value Bets", icon: "⚡" },
             { id: "sharp", label: "Sharp Plays", icon: "🧠" },
+            { id: "value", label: "Value Bets", icon: "⚡" },
             { id: "parlays", label: "Parlays", icon: "🎰" },
             { id: "odds", label: "Odds", icon: "📊" },
             { id: "alerts", label: "Alerts", icon: "🔔" },
@@ -1243,7 +1223,7 @@ export default function App() {
                             <div style={{ fontSize: 14, fontWeight: 800, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>+{play.edge}%</div>
                           </div>
                         </div>
-                        {!isRestricted && <a
+                        <a
                           href={BOOK_URLS[play.book] || "#"}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1260,7 +1240,7 @@ export default function App() {
                           }}
                         >
                           Bet on {play.book} →
-                        </a>}
+                        </a>
                       </div>
                     </div>
                   );
@@ -1274,36 +1254,34 @@ export default function App() {
             </div>
 
             {/* Affiliate CTA */}
-            {!isRestricted && (
-              <div style={{
-                marginTop: 20,
-                background: "#fff",
-                border: "1px solid #e2e5ea",
-                borderRadius: 14,
-                padding: 18,
-                textAlign: "center",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            <div style={{
+              marginTop: 20,
+              background: "#fff",
+              border: "1px solid #e2e5ea",
+              borderRadius: 14,
+              padding: 18,
+              textAlign: "center",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Bet Sharp on DraftKings</div>
+              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
+              <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                display: "inline-block",
+                padding: "10px 28px",
+                borderRadius: 10,
+                border: "none",
+                background: "linear-gradient(135deg, #1a1d23, #2d3748)",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 800,
+                cursor: "pointer",
+                letterSpacing: "0.02em",
+                textDecoration: "none",
               }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Bet Sharp on DraftKings</div>
-                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
-                <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
-                  display: "inline-block",
-                  padding: "10px 28px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "linear-gradient(135deg, #1a1d23, #2d3748)",
-                  color: "#fff",
-                  fontSize: 13,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  letterSpacing: "0.02em",
-                  textDecoration: "none",
-                }}>
-                  Claim Bonus →
-                </a>
-                <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
-              </div>
-            )}
+                Claim Bonus →
+              </a>
+              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+            </div>
           </>
         )}
 
@@ -1345,7 +1323,7 @@ export default function App() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {filteredValue.map((bet, i) => (
-                <ValueBetCard key={`${bet.game.id}-${bet.outcome}-${bet.book}`} bet={bet} index={i} restricted={isRestricted} />
+                <ValueBetCard key={`${bet.game.id}-${bet.outcome}-${bet.book}`} bet={bet} index={i} />
               ))}
               {filteredValue.length === 0 && (
                 <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
@@ -1356,36 +1334,34 @@ export default function App() {
             </div>
 
             {/* Affiliate CTA */}
-            {!isRestricted && (
-              <div style={{
-                marginTop: 20,
-                background: "#fff",
-                border: "1px solid #e2e5ea",
-                borderRadius: 14,
-                padding: 18,
-                textAlign: "center",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            <div style={{
+              marginTop: 20,
+              background: "#fff",
+              border: "1px solid #e2e5ea",
+              borderRadius: 14,
+              padding: 18,
+              textAlign: "center",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Place these bets on DraftKings</div>
+              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
+              <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                display: "inline-block",
+                padding: "10px 28px",
+                borderRadius: 10,
+                border: "none",
+                background: "#1a73e8",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 800,
+                cursor: "pointer",
+                letterSpacing: "0.02em",
+                textDecoration: "none",
               }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Place these bets on DraftKings</div>
-                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
-                <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
-                  display: "inline-block",
-                  padding: "10px 28px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "#1a73e8",
-                  color: "#fff",
-                  fontSize: 13,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  letterSpacing: "0.02em",
-                  textDecoration: "none",
-                }}>
-                  Claim Bonus →
-                </a>
-                <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
-              </div>
-            )}
+                Claim Bonus →
+              </a>
+              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+            </div>
           </>
         )}
 
@@ -1564,67 +1540,63 @@ export default function App() {
                     </div>
                   </div>
                   {/* Build parlay CTA */}
-                  {!isRestricted && (
-                    <div style={{
-                      padding: "10px 16px",
-                      borderTop: "1px solid #e2e5ea",
-                      display: "flex",
-                      gap: 8,
-                      justifyContent: "center",
-                      flexWrap: "wrap",
-                    }}>
-                      {["DraftKings", "FanDuel", "BetMGM"].map(book => (
-                        <a
-                          key={book}
-                          href={BOOK_URLS[book]}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            padding: "6px 14px",
-                            borderRadius: 8,
-                            background: "#e8f0fe",
-                            border: "1px solid #c5d7f5",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: "#1a73e8",
-                            textDecoration: "none",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Build on {book} →
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                  <div style={{
+                    padding: "10px 16px",
+                    borderTop: "1px solid #e2e5ea",
+                    display: "flex",
+                    gap: 8,
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                  }}>
+                    {["DraftKings", "FanDuel", "BetMGM"].map(book => (
+                      <a
+                        key={book}
+                        href={BOOK_URLS[book]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 8,
+                          background: "#e8f0fe",
+                          border: "1px solid #c5d7f5",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#1a73e8",
+                          textDecoration: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Build on {book} →
+                      </a>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
 
             {/* Affiliate CTA for parlays */}
-            {!isRestricted && (
-              <div style={{
-                marginTop: 20,
-                background: "#fff",
-                border: "1px solid #e2e5ea",
-                borderRadius: 14,
-                padding: 18,
-                textAlign: "center",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            <div style={{
+              marginTop: 20,
+              background: "#fff",
+              border: "1px solid #e2e5ea",
+              borderRadius: 14,
+              padding: 18,
+              textAlign: "center",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Build these parlays on FanDuel</div>
+              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users: Bet $5, Get $200 in bonus bets</div>
+              <a href="https://www.fanduel.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                display: "inline-block",
+                padding: "10px 28px", borderRadius: 10, border: "none",
+                background: "#7c3aed",
+                color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer",
+                textDecoration: "none",
               }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Build these parlays on FanDuel</div>
-                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users: Bet $5, Get $200 in bonus bets</div>
-                <a href="https://www.fanduel.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
-                  display: "inline-block",
-                  padding: "10px 28px", borderRadius: 10, border: "none",
-                  background: "#7c3aed",
-                  color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer",
-                  textDecoration: "none",
-                }}>
-                  Build Parlay →
-                </a>
-                <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
-              </div>
-            )}
+                Build Parlay →
+              </a>
+              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+            </div>
 
           </>
         )}
@@ -1779,17 +1751,17 @@ export default function App() {
           bottom: 0,
           left: 0,
           right: 0,
-          background: "#fff",
-          borderTop: "1px solid #dde1e6",
+          background: "#1a1d23",
+          borderTop: "2px solid #2d3748",
           display: "flex",
           zIndex: 900,
-          padding: "6px 4px",
-          paddingBottom: "calc(6px + env(safe-area-inset-bottom, 0px))",
-          boxShadow: "0 -4px 20px rgba(0,0,0,0.1)",
+          padding: "8px 6px 4px",
+          paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
         }}>
           {[
-            { id: "value", label: "Value", icon: "⚡" },
             { id: "sharp", label: "Sharp", icon: "🧠" },
+            { id: "value", label: "Value", icon: "⚡" },
             { id: "parlays", label: "Parlays", icon: "🎰" },
             { id: "odds", label: "Odds", icon: "📊" },
             { id: "alerts", label: "Alerts", icon: "🔔" },
@@ -1802,22 +1774,22 @@ export default function App() {
               onClick={() => setActiveTab(tab.id)}
               style={{
                 flex: 1,
-                padding: "6px 2px 4px",
+                padding: "8px 2px 6px",
                 border: "none",
-                background: isActive ? "#e8f0fe" : "none",
-                borderRadius: 10,
+                background: isActive ? "#1a73e8" : "transparent",
+                borderRadius: 12,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 2,
+                gap: 3,
                 cursor: "pointer",
-                color: isActive ? "#1a73e8" : "#8b919a",
+                color: isActive ? "#fff" : "#6b7280",
                 transition: "all 0.2s",
                 fontFamily: "'DM Sans', sans-serif",
               }}
             >
-              <span style={{ fontSize: 20, lineHeight: 1 }}>{tab.icon}</span>
-              <span style={{ fontSize: 9, fontWeight: isActive ? 800 : 600, letterSpacing: "0.02em" }}>{tab.label}</span>
+              <span style={{ fontSize: 22, lineHeight: 1 }}>{tab.icon}</span>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.02em" }}>{tab.label}</span>
             </button>
             );
           })}
@@ -2032,6 +2004,22 @@ export default function App() {
         fontSize: 11,
         lineHeight: 1.7,
       }}>
+        {/* Restricted state notice */}
+        {isRestricted && (
+          <div style={{
+            background: "rgba(251,191,36,0.1)",
+            border: "1px solid rgba(251,191,36,0.3)",
+            borderRadius: 10,
+            padding: "12px 16px",
+            marginBottom: 16,
+            fontSize: 11,
+            color: "#fbbf24",
+            lineHeight: 1.6,
+          }}>
+            <strong>Notice:</strong> Sports betting is not currently legal in your state. MyOddsy is an informational and entertainment platform only. Content does not constitute an offer, solicitation, or encouragement to gamble. Please check your local laws.
+          </div>
+        )}
+
         {/* Responsible gambling banner */}
         <div style={{
           background: "rgba(220,38,38,0.1)",
