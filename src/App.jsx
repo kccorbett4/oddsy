@@ -129,11 +129,18 @@ const calcEV = (odds, estimatedProb) => {
   return (estimatedProb * payout - (1 - estimatedProb)) * 100;
 };
 
+// Filter to only upcoming games (not started yet)
+const getUpcomingGames = (games) => {
+  const now = new Date();
+  return games.filter(game => new Date(game.commence_time) > now);
+};
+
 // Find value bets by comparing across books
 const findValueBets = (games) => {
   const valueBets = [];
+  const upcomingGames = getUpcomingGames(games);
 
-  games.forEach(game => {
+  upcomingGames.forEach(game => {
     const marketTypes = ["h2h", "spreads", "totals"];
     marketTypes.forEach(marketType => {
       const allOutcomes = {};
@@ -161,7 +168,8 @@ const findValueBets = (games) => {
           const ev = calcEV(outcome.price, vigFreeProb);
           const edgePercent = ((vigFreeProb - thisProb) / thisProb * 100);
 
-          if (ev > 2 && edgePercent > 2) {
+          // Filter: require reasonable EV, edge, and don't recommend extreme long shots (odds > +500)
+          if (ev > 2 && edgePercent > 2 && outcome.price < 500 && outcome.price > -500) {
             valueBets.push({
               game,
               marketType,
@@ -835,18 +843,18 @@ export default function App() {
               padding: "16px 18px",
               marginBottom: 18,
             }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 6 }}>How Our Parlays Work</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 6 }}>Parlay Picks of the Day</div>
               <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.7 }}>
-                We combine <strong style={{ color: "#1a1d23" }}>3 positive-value bets</strong> into parlays using different strategies.
-                Each leg has a proven edge from our odds comparison. Choose your wager amount below to see potential payouts.
-                Hit <strong style={{ color: "#1a73e8" }}>Regenerate</strong> for fresh combinations.
+                We identify the <strong style={{ color: "#1a1d23" }}>best value bets</strong> across upcoming games and group them into 3-leg parlay suggestions.
+                Pick the combination you like, then build it on your preferred sportsbook. Odds may vary slightly between books —
+                use the <strong style={{ color: "#1a73e8" }}>Value Bets</strong> tab to find which book has the best line for each leg.
               </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>3-Leg Value Parlays</h2>
-                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Built from the best +EV bets across all sports</div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>Today's Best Parlays</h2>
+                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>3-leg combinations built from upcoming +EV picks</div>
               </div>
               <button
                 onClick={() => setParlayKey(k => k + 1)}
@@ -946,7 +954,7 @@ export default function App() {
                               {leg.outcome} {leg.point ? `(${leg.point > 0 ? '+' : ''}${leg.point})` : ''}
                             </div>
                             <div style={{ fontSize: 10, color: "#8b919a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {leg.game.away_team} @ {leg.game.home_team} · <span style={{ color: "#1a73e8", fontWeight: 600 }}>{leg.book}</span>
+                              {leg.game.away_team} @ {leg.game.home_team} · Best odds: <span style={{ color: "#1a73e8", fontWeight: 600 }}>{leg.book}</span>
                             </div>
                           </div>
                         </div>
@@ -997,6 +1005,37 @@ export default function App() {
                       </div>
                       <div style={{ fontSize: 9, color: "#8b919a" }}>estimated</div>
                     </div>
+                  </div>
+                  {/* Build parlay CTA */}
+                  <div style={{
+                    padding: "10px 16px",
+                    borderTop: "1px solid #e2e5ea",
+                    display: "flex",
+                    gap: 8,
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                  }}>
+                    {["DraftKings", "FanDuel", "BetMGM"].map(book => (
+                      <a
+                        key={book}
+                        href={BOOK_URLS[book]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 8,
+                          background: "#e8f0fe",
+                          border: "1px solid #c5d7f5",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#1a73e8",
+                          textDecoration: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Build on {book} →
+                      </a>
+                    ))}
                   </div>
                 </div>
               ))}
