@@ -9,14 +9,14 @@ const SPORTS = [
   { id: "americanfootball_ncaaf", name: "NCAAF", icon: "🏈", season: false },
 ];
 
-const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "PointsBet", "BetRivers"];
+const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "Fanatics", "BetRivers"];
 
 const BOOK_URLS = {
   DraftKings: "https://www.draftkings.com/sportsbook",
   FanDuel: "https://www.fanduel.com/sportsbook",
   BetMGM: "https://sports.betmgm.com",
   Caesars: "https://www.caesars.com/sportsbook-and-casino",
-  PointsBet: "https://www.pointsbet.com",
+  Fanatics: "https://www.fanatics.com/sportsbook",
   BetRivers: "https://www.betrivers.com",
 };
 
