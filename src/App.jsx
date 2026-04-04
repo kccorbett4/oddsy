@@ -351,7 +351,7 @@ const ValueBetCard = ({ bet, index }) => {
           {bet.game.away_team} @ {bet.game.home_team}
         </div>
       </div>
-      <div style={{ textAlign: "right", flexShrink: 0, minWidth: 100 }}>
+      <div style={{ textAlign: "right", flexShrink: 0, minWidth: 110 }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: evColor, fontFamily: "'Space Mono', monospace" }}>
           +{bet.ev}%
         </div>
@@ -378,10 +378,9 @@ const ValueBetCard = ({ bet, index }) => {
             borderRadius: 6,
             background: "#e8f0fe",
             border: "1px solid #c5d7f5",
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 700,
             color: "#1a73e8",
-            whiteSpace: "nowrap",
             textDecoration: "none",
             cursor: "pointer",
           }}
@@ -686,7 +685,7 @@ export default function App() {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div>
-            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 48, display: "block" }} />
+            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 56, display: "block", maxWidth: "60vw" }} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
