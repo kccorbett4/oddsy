@@ -238,9 +238,11 @@ const findSharpPlays = (games, liveScores) => {
 
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    if (status === "final" || status === "blowout" || status === "live_unknown") return;
-    const isLive = status === "in_progress";
-    if (isLive) return; // Sharp plays focus on pre-game edges
+    // Only skip games we know are finished or blowouts
+    if (status === "final" || status === "blowout") return;
+    // Skip confirmed live games (sharp plays are pre-game)
+    if (status === "in_progress") return;
+    // For "live_unknown" — the game may have started but we can't confirm, include it
 
     const marketTypes = ["h2h", "spreads", "totals"];
     marketTypes.forEach(marketType => {
@@ -701,7 +703,7 @@ export default function App() {
 
   useEffect(() => {
     const CACHE_KEY = "oddsy_odds_cache";
-    const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+    const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
     const fetchOdds = async () => {
       setLoading(true);
