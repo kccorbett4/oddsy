@@ -273,12 +273,12 @@ const Pill = ({ active, onClick, children, accent }) => (
   <button
     onClick={onClick}
     style={{
-      padding: "6px 14px",
+      padding: "8px 16px",
       borderRadius: 20,
-      border: active ? `1.5px solid ${accent || '#00f0ff'}` : "1.5px solid rgba(255,255,255,0.08)",
-      background: active ? `${accent || '#00f0ff'}15` : "rgba(255,255,255,0.03)",
-      color: active ? (accent || '#00f0ff') : "rgba(255,255,255,0.5)",
-      fontSize: 13,
+      border: active ? `1.5px solid ${accent || '#00f0ff'}` : "1.5px solid rgba(255,255,255,0.12)",
+      background: active ? `${accent || '#00f0ff'}15` : "rgba(255,255,255,0.05)",
+      color: active ? (accent || '#00f0ff') : "rgba(255,255,255,0.6)",
+      fontSize: 14,
       fontWeight: 600,
       cursor: "pointer",
       transition: "all 0.2s",
@@ -292,34 +292,34 @@ const Pill = ({ active, onClick, children, accent }) => (
 
 const StatCard = ({ label, value, sub, color }) => (
   <div style={{
-    background: "rgba(255,255,255,0.02)",
-    border: "1px solid rgba(255,255,255,0.06)",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 14,
-    padding: "16px 18px",
+    padding: "18px 20px",
     flex: 1,
     minWidth: 130,
   }}>
-    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{label}</div>
-    <div style={{ fontSize: 26, fontWeight: 800, color: color || "#fff", marginTop: 4, fontFamily: "'Space Mono', monospace" }}>{value}</div>
-    {sub && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>{sub}</div>}
+    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{label}</div>
+    <div style={{ fontSize: 28, fontWeight: 800, color: color || "#fff", marginTop: 6, fontFamily: "'Space Mono', monospace" }}>{value}</div>
+    {sub && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{sub}</div>}
   </div>
 );
 
 const ValueBetCard = ({ bet, index }) => {
   const evColor = parseFloat(bet.ev) > 5 ? "#00ff88" : parseFloat(bet.ev) > 3 ? "#00f0ff" : "#f0c800";
-  const marketLabel = bet.marketType === "h2h" ? "ML" : bet.marketType === "spreads" ? "Spread" : "Total";
+  const marketLabel = bet.marketType === "h2h" ? "Moneyline" : bet.marketType === "spreads" ? "Spread" : "Total";
 
   return (
     <div style={{
-      background: "linear-gradient(135deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.01) 100%)",
-      border: "1px solid rgba(255,255,255,0.06)",
+      background: "linear-gradient(135deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.015) 100%)",
+      border: "1px solid rgba(255,255,255,0.08)",
       borderLeft: `3px solid ${evColor}`,
       borderRadius: 12,
-      padding: "14px 16px",
+      padding: "16px 18px",
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      gap: 12,
+      gap: 14,
       transition: "all 0.2s",
       cursor: "pointer",
       animation: `fadeSlideIn 0.4s ease ${index * 0.05}s both`,
@@ -328,36 +328,36 @@ const ValueBetCard = ({ bet, index }) => {
     onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.01) 100%)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 11, background: "rgba(255,255,255,0.06)", padding: "2px 7px", borderRadius: 4, color: "rgba(255,255,255,0.5)", fontWeight: 700, letterSpacing: "0.05em" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 12, background: "rgba(255,255,255,0.08)", padding: "3px 8px", borderRadius: 4, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: "0.05em" }}>
             {bet.game.sport_title}
           </span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{formatTime(bet.commence)}</span>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{formatTime(bet.commence)}</span>
         </div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 2 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
           {bet.outcome} {bet.point ? `(${bet.point > 0 ? '+' : ''}${bet.point})` : ''} — {marketLabel}
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
           {bet.game.away_team} @ {bet.game.home_team}
         </div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: evColor, fontFamily: "'Space Mono', monospace" }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: evColor, fontFamily: "'Space Mono', monospace" }}>
           +{bet.ev}%
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 2 }}>EV</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>Expected Value</div>
         <div style={{
-          fontSize: 13,
+          fontSize: 15,
           fontWeight: 700,
           color: "#fff",
-          background: "rgba(255,255,255,0.06)",
-          padding: "3px 8px",
+          background: "rgba(255,255,255,0.08)",
+          padding: "4px 10px",
           borderRadius: 6,
           fontFamily: "'Space Mono', monospace",
         }}>
           {formatOdds(bet.odds)}
         </div>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 3 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
           {bet.book}
         </div>
       </div>
@@ -385,8 +385,8 @@ const OddsRow = ({ game }) => {
       fontSize: 13,
     }}>
       <div>
-        <div style={{ fontWeight: 600, color: "#fff", marginBottom: 2 }}>{game.away_team}</div>
-        <div style={{ fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>@ {game.home_team}</div>
+        <div style={{ fontWeight: 700, color: "#fff", fontSize: 14, marginBottom: 3 }}>{game.away_team}</div>
+        <div style={{ fontWeight: 600, color: "rgba(255,255,255,0.5)", fontSize: 13 }}>@ {game.home_team}</div>
       </div>
       <div style={{ textAlign: "center", minWidth: 50 }}>
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 2 }}>TIME</div>
@@ -629,16 +629,16 @@ export default function App() {
           <div>
             <h1 style={{
               margin: 0,
-              fontSize: 24,
+              fontSize: 28,
               fontWeight: 900,
               letterSpacing: "-0.03em",
               background: "linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.7) 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
             }}>
-              Oddsy
+              MyOddsy
             </h1>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "'Space Mono', monospace", letterSpacing: "0.15em", textTransform: "uppercase" }}>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "'Space Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase" }}>
               Smart Betting Intelligence
             </div>
           </div>
@@ -691,7 +691,7 @@ export default function App() {
               borderBottom: activeTab === tab.id ? "2px solid #00f0ff" : "2px solid transparent",
               background: "none",
               color: activeTab === tab.id ? "#fff" : "rgba(255,255,255,0.3)",
-              fontSize: 12,
+              fontSize: 14,
               fontWeight: 700,
               cursor: "pointer",
               fontFamily: "'DM Sans', sans-serif",
@@ -724,16 +724,32 @@ export default function App() {
         {/* ── VALUE BETS TAB ── */}
         {activeTab === "value" && (
           <>
+            {/* How it works explainer */}
+            <div style={{
+              background: "linear-gradient(135deg, rgba(0,240,255,0.05) 0%, rgba(0,255,136,0.03) 100%)",
+              border: "1px solid rgba(0,240,255,0.1)",
+              borderRadius: 14,
+              padding: "16px 18px",
+              marginBottom: 18,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 6 }}>How We Find Value Bets</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+                We compare odds from <strong style={{ color: "rgba(255,255,255,0.7)" }}>6 sportsbooks</strong> for every game.
+                When one book's odds are better than the average, that's a <strong style={{ color: "#00ff88" }}>+EV (positive expected value)</strong> bet —
+                meaning the payout is higher than the true probability suggests. The higher the <strong style={{ color: "#00f0ff" }}>EV%</strong>, the bigger the edge.
+              </div>
+            </div>
+
             <div style={{ display: "flex", gap: 10, marginBottom: 18, overflowX: "auto" }}>
-              <StatCard label="Bets Found" value={filteredValue.length} sub="positive EV" />
-              <StatCard label="Top Edge" value={`+${topEdge}%`} color="#00ff88" sub="expected value" />
-              <StatCard label="Avg EV" value={`+${avgEV}%`} color="#00f0ff" sub="across all bets" />
+              <StatCard label="Bets Found" value={filteredValue.length} sub="with a positive edge" />
+              <StatCard label="Best Edge" value={`+${topEdge}%`} color="#00ff88" sub="expected value" />
+              <StatCard label="Avg Edge" value={`+${avgEV}%`} color="#00f0ff" sub="across all bets" />
             </div>
 
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
             }}>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.8)" }}>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>
                 Top Value Picks
               </h2>
               <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "'Space Mono', monospace" }}>
@@ -785,10 +801,26 @@ export default function App() {
         {/* ── PARLAYS TAB ── */}
         {activeTab === "parlays" && (
           <>
+            {/* Parlay explainer */}
+            <div style={{
+              background: "linear-gradient(135deg, rgba(168,85,247,0.06) 0%, rgba(0,240,255,0.03) 100%)",
+              border: "1px solid rgba(168,85,247,0.1)",
+              borderRadius: 14,
+              padding: "16px 18px",
+              marginBottom: 18,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 6 }}>How Our Parlays Work</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+                We combine <strong style={{ color: "rgba(255,255,255,0.7)" }}>3 positive-value bets</strong> into parlays using different strategies.
+                Each leg has a proven edge from our odds comparison. Choose your wager amount below to see potential payouts.
+                Hit <strong style={{ color: "#00f0ff" }}>Regenerate</strong> for fresh combinations.
+              </div>
+            </div>
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fff" }}>3-Leg Value Parlays</h2>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Auto-generated from undervalued odds across all sports</div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>3-Leg Value Parlays</h2>
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>Built from the best +EV bets across all sports</div>
               </div>
               <button
                 onClick={() => setParlayKey(k => k + 1)}
@@ -963,16 +995,6 @@ export default function App() {
               <div style={{ fontSize: 9, color: "rgba(255,255,255,0.15)", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
             </div>
 
-            {/* Parlay explainer */}
-            <div style={{
-              marginTop: 16, padding: 14, borderRadius: 12,
-              background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)",
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>How Our Parlays Work</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", lineHeight: 1.6 }}>
-                We scan every available line across 6+ sportsbooks, calculate the true implied probability for each outcome (removing the vig), then identify bets where the posted odds offer positive expected value. Parlays are built by combining 3 +EV legs using different strategies — diversified by sport, risk profile, and edge size. Hit "Regenerate" to get fresh combinations.
-              </div>
-            </div>
           </>
         )}
 
