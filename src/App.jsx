@@ -701,7 +701,7 @@ export default function App() {
 
   useEffect(() => {
     const CACHE_KEY = "oddsy_odds_cache";
-    const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+    const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
     const fetchOdds = async () => {
       setLoading(true);
