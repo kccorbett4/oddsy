@@ -685,32 +685,7 @@ export default function App() {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div>
-            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 64, display: "block", maxWidth: "65vw" }} />
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              onClick={() => setRefreshKey(k => k + 1)}
-              style={{
-                background: "#f0f1f3",
-                border: "1px solid #dde1e6",
-                borderRadius: 10,
-                padding: "8px 12px",
-                color: "#5f6368",
-                cursor: "pointer",
-                fontSize: 14,
-              }}
-            >
-              ↻
-            </button>
-            <div style={{
-              width: 8, height: 8, borderRadius: 4,
-              background: dataSource === "live" ? "#0d9f4f" : dataSource === "demo" ? "#e8a100" : "#ccc",
-              animation: "pulse 2s infinite",
-              boxShadow: dataSource === "live" ? "0 0 6px rgba(13,159,79,0.4)" : "none",
-            }} />
-            <span style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
-              {loading ? "..." : dataSource === "live" ? "LIVE" : "DEMO"}
-            </span>
+            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 80, display: "block", maxWidth: "75vw" }} />
           </div>
         </div>
       </header>
