@@ -767,6 +767,7 @@ export default function App() {
   const [wagerAmount, setWagerAmount] = useState(25);
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState("loading");
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [liveScores, setLiveScores] = useState([]);
   const [sharpPlays, setSharpPlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
@@ -846,6 +847,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // Recalculate value bets when live scores update (filters out blowouts/finished games)
   useEffect(() => {
     if (games.length > 0 && liveScores.length > 0) {
@@ -909,45 +916,45 @@ export default function App() {
         </div>
       </header>
 
-      {/* Nav Tabs */}
-      <nav style={{
-        display: "flex",
-        gap: 0,
-        padding: "0 10px",
-        background: "#fff",
-        borderBottom: "1px solid #e2e5ea",
-        overflowX: "auto",
-      }}>
-        {[
-          { id: "value", label: "Value Bets", icon: "⚡" },
-          { id: "sharp", label: "Sharp Plays", icon: "🧠" },
-          { id: "parlays", label: "Parlays", icon: "🎰" },
-          { id: "odds", label: "Odds", icon: "📊" },
-          { id: "alerts", label: "Alerts", icon: "🔔" },
-          { id: "scores", label: "Scores", icon: "🏆" },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              flex: "1 0 auto",
-              padding: "12px 8px",
-              border: "none",
-              borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
-              background: "none",
-              color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-              transition: "all 0.2s",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </nav>
+      {/* Nav Tabs — top bar on desktop only */}
+      {!isMobile && (
+        <nav style={{
+          display: "flex",
+          gap: 0,
+          padding: "0 20px",
+          background: "#fff",
+          borderBottom: "1px solid #e2e5ea",
+        }}>
+          {[
+            { id: "value", label: "Value Bets", icon: "⚡" },
+            { id: "sharp", label: "Sharp Plays", icon: "🧠" },
+            { id: "parlays", label: "Parlays", icon: "🎰" },
+            { id: "odds", label: "Odds", icon: "📊" },
+            { id: "alerts", label: "Alerts", icon: "🔔" },
+            { id: "scores", label: "Scores", icon: "🏆" },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1,
+                padding: "12px 0",
+                border: "none",
+                borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
+                background: "none",
+                color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                transition: "all 0.2s",
+              }}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {/* Sport Filter */}
       <div style={{
@@ -965,7 +972,7 @@ export default function App() {
       </div>
 
       {/* Content */}
-      <div style={{ padding: "0 20px 100px" }}>
+      <div style={{ padding: isMobile ? "0 20px 80px" : "0 20px 40px" }}>
 
         {/* ── LIVE SCORES TAB ── */}
         {activeTab === "scores" && (
@@ -1776,6 +1783,65 @@ export default function App() {
       </div>
 
       {showAlertBuilder && <AlertBuilder onClose={() => setShowAlertBuilder(false)} />}
+
+      {/* ── MOBILE BOTTOM TAB BAR ── */}
+      {isMobile && (
+        <nav style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: "#fff",
+          borderTop: "1px solid #e2e5ea",
+          display: "flex",
+          zIndex: 900,
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          boxShadow: "0 -2px 10px rgba(0,0,0,0.06)",
+        }}>
+          {[
+            { id: "value", label: "Value", icon: "⚡" },
+            { id: "sharp", label: "Sharp", icon: "🧠" },
+            { id: "parlays", label: "Parlays", icon: "🎰" },
+            { id: "odds", label: "Odds", icon: "📊" },
+            { id: "alerts", label: "Alerts", icon: "🔔" },
+            { id: "scores", label: "Scores", icon: "🏆" },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1,
+                padding: "8px 0 6px",
+                border: "none",
+                background: "none",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+                cursor: "pointer",
+                color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
+                transition: "color 0.2s",
+                fontFamily: "'DM Sans', sans-serif",
+                position: "relative",
+              }}
+            >
+              {activeTab === tab.id && (
+                <div style={{
+                  position: "absolute",
+                  top: 0,
+                  left: "20%",
+                  right: "20%",
+                  height: 2,
+                  background: "#1a73e8",
+                  borderRadius: "0 0 2px 2px",
+                }} />
+              )}
+              <span style={{ fontSize: 18, lineHeight: 1 }}>{tab.icon}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.02em" }}>{tab.label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
 
       {/* ── LEGAL PAGE MODAL ── */}
       {legalPage && (
