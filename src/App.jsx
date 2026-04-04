@@ -685,7 +685,7 @@ export default function App() {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div>
-            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 56, display: "block", maxWidth: "60vw" }} />
+            <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 64, display: "block", maxWidth: "65vw" }} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
