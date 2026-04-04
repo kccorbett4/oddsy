@@ -37,8 +37,8 @@ export default async function handler(req, res) {
       // If a sport has no events (404), just skip it
     }
 
-    // Cache for 15 minutes on Vercel's edge, serve stale for 10 more min while revalidating
-    res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=600");
+    // Cache for 5 minutes on Vercel's edge, serve stale for 3 more min while revalidating
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=180");
     return res.status(200).json({
       games: allGames,
       requestsRemaining: remaining,

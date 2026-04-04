@@ -129,20 +129,68 @@ const calcEV = (odds, estimatedProb) => {
   return (estimatedProb * payout - (1 - estimatedProb)) * 100;
 };
 
-// Filter to only upcoming games (not started yet)
-const getUpcomingGames = (games) => {
-  const now = new Date();
-  return games.filter(game => new Date(game.commence_time) > now);
+// Check if a game should be excluded based on live score data
+const getGameStatus = (game, liveScores) => {
+  if (!liveScores || liveScores.length === 0) {
+    // No score data — fall back to commence_time check
+    const now = new Date();
+    if (new Date(game.commence_time) <= now) return "live_unknown";
+    return "upcoming";
+  }
+
+  // Try to match this odds game to a live score event by team names
+  const homeNorm = game.home_team?.toLowerCase();
+  const awayNorm = game.away_team?.toLowerCase();
+
+  const match = liveScores.find(e => {
+    const h = e.home?.name?.toLowerCase() || "";
+    const a = e.away?.name?.toLowerCase() || "";
+    return (h.includes(homeNorm) || homeNorm?.includes(h) || a.includes(awayNorm) || awayNorm?.includes(a))
+      && (h.includes(homeNorm) || homeNorm?.includes(h))
+      && (a.includes(awayNorm) || awayNorm?.includes(a));
+  });
+
+  if (!match) {
+    const now = new Date();
+    if (new Date(game.commence_time) <= now) return "live_unknown";
+    return "upcoming";
+  }
+
+  if (match.status.type === "STATUS_FINAL") return "final";
+  if (match.status.type === "STATUS_IN_PROGRESS") {
+    const diff = Math.abs(match.home.score - match.away.score);
+    const sport = game.sport_key;
+
+    // Blowout detection per sport
+    if (sport === "basketball_nba" && diff >= 20) return "blowout";
+    if (sport === "americanfootball_nfl" && diff >= 21) return "blowout";
+    if (sport === "baseball_mlb" && diff >= 7) return "blowout";
+    if (sport === "icehockey_nhl" && diff >= 4) return "blowout";
+
+    return "in_progress";
+  }
+
+  return "upcoming";
 };
 
-// Find value bets by comparing across books
-const findValueBets = (games) => {
+// Find value bets by comparing across books, using live scores to filter
+const findValueBets = (games, liveScores) => {
   const valueBets = [];
-  const upcomingGames = getUpcomingGames(games);
 
-  upcomingGames.forEach(game => {
+  games.forEach(game => {
+    const status = getGameStatus(game, liveScores);
+
+    // Skip finished games and blowouts entirely
+    if (status === "final" || status === "blowout" || status === "live_unknown") return;
+
+    // Flag if game is in progress (we'll show it but mark it)
+    const isLive = status === "in_progress";
+
     const marketTypes = ["h2h", "spreads", "totals"];
     marketTypes.forEach(marketType => {
+      // Don't recommend moneyline on live games — spreads and totals are more relevant
+      if (isLive && marketType === "h2h") return;
+
       const allOutcomes = {};
 
       game.bookmakers.forEach(book => {
@@ -168,7 +216,7 @@ const findValueBets = (games) => {
           const ev = calcEV(outcome.price, vigFreeProb);
           const edgePercent = ((vigFreeProb - thisProb) / thisProb * 100);
 
-          // Filter: require reasonable EV, edge, and don't recommend extreme long shots (odds > +500)
+          // Filter: reasonable EV/edge, no extreme long shots
           if (ev > 2 && edgePercent > 2 && outcome.price < 500 && outcome.price > -500) {
             valueBets.push({
               game,
@@ -182,6 +230,7 @@ const findValueBets = (games) => {
               avgProb: (vigFreeProb * 100).toFixed(1),
               impliedProb: (thisProb * 100).toFixed(1),
               commence: game.commence_time,
+              isLive,
             });
           }
         });
@@ -189,7 +238,13 @@ const findValueBets = (games) => {
     });
   });
 
-  return valueBets.sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev)).slice(0, 25);
+  // Sort: upcoming games first, then by EV
+  return valueBets
+    .sort((a, b) => {
+      if (a.isLive !== b.isLive) return a.isLive ? 1 : -1;
+      return parseFloat(b.ev) - parseFloat(a.ev);
+    })
+    .slice(0, 30);
 };
 
 // Generate 3-leg parlays from undervalued bets across different sports
@@ -351,6 +406,7 @@ const ValueBetCard = ({ bet, index }) => {
             {bet.game.sport_title}
           </span>
           <span style={{ fontSize: 12, color: "#8b919a" }}>{formatTime(bet.commence)}</span>
+          {bet.isLive && <span style={{ fontSize: 10, background: "#fef2f2", color: "#dc2626", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: "0.05em" }}>LIVE</span>}
         </div>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1d23", marginBottom: 4 }}>
           {bet.outcome} {bet.point ? `(${bet.point > 0 ? '+' : ''}${bet.point})` : ''} — {marketLabel}
@@ -579,7 +635,7 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
-  const [activeTab, setActiveTab] = useState("scores");
+  const [activeTab, setActiveTab] = useState("value");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -593,7 +649,7 @@ export default function App() {
 
   useEffect(() => {
     const CACHE_KEY = "oddsy_odds_cache";
-    const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
     const fetchOdds = async () => {
       setLoading(true);
@@ -605,7 +661,7 @@ export default function App() {
           const { data: cachedData, timestamp } = JSON.parse(cached);
           if (Date.now() - timestamp < CACHE_DURATION && cachedData.length > 0) {
             setGames(cachedData);
-            const vb = findValueBets(cachedData);
+            const vb = findValueBets(cachedData, liveScores);
             setValueBets(vb);
             setParlays(generateParlays(vb));
             setDataSource("live");
@@ -622,7 +678,7 @@ export default function App() {
         const json = await res.json();
         if (json.games && json.games.length > 0) {
           setGames(json.games);
-          const vb = findValueBets(json.games);
+          const vb = findValueBets(json.games, liveScores);
           setValueBets(vb);
           setParlays(generateParlays(vb));
           setDataSource("live");
@@ -635,7 +691,7 @@ export default function App() {
         // Fall back to mock data
         const data = generateMockOdds();
         setGames(data);
-        const vb = findValueBets(data);
+        const vb = findValueBets(data, liveScores);
         setValueBets(vb);
         setParlays(generateParlays(vb));
         setDataSource("demo");
@@ -662,6 +718,15 @@ export default function App() {
     const interval = setInterval(fetchScores, 120000);
     return () => clearInterval(interval);
   }, []);
+
+  // Recalculate value bets when live scores update (filters out blowouts/finished games)
+  useEffect(() => {
+    if (games.length > 0 && liveScores.length > 0) {
+      const vb = findValueBets(games, liveScores);
+      setValueBets(vb);
+      setParlays(generateParlays(vb));
+    }
+  }, [liveScores]);
 
   useEffect(() => {
     if (valueBets.length > 0) setParlays(generateParlays(valueBets));
@@ -725,11 +790,11 @@ export default function App() {
         borderBottom: "1px solid #e2e5ea",
       }}>
         {[
-          { id: "scores", label: "Scores", icon: "🏆" },
           { id: "value", label: "Value Bets", icon: "⚡" },
           { id: "parlays", label: "Parlays", icon: "🎰" },
           { id: "odds", label: "Odds", icon: "📊" },
           { id: "alerts", label: "Alerts", icon: "🔔" },
+          { id: "scores", label: "Scores", icon: "🏆" },
         ].map(tab => (
           <button
             key={tab.id}
