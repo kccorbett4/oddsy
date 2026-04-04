@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const freshGames = allGames.filter(g => g.commence_time > sixHoursAgo || !g.commence_time);
 
-    // Aggressive caching: 1 hour fresh, serve stale for 1 more hour while revalidating.
+    // Aggressive caching: 1 hour fresh, serve stale for 1 more hour while revalidating
     // This means the Odds API only gets hit when Vercel's edge cache expires (~once/hour),
     // NOT on every user page load.
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
