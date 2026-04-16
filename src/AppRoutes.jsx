@@ -1,0 +1,22 @@
+import { Routes, Route } from 'react-router-dom'
+import App from './App.jsx'
+import EvBettingPage from './seo-pages/EvBettingPage.jsx'
+import OddsComparisonPage from './seo-pages/OddsComparisonPage.jsx'
+import ParlayCalculatorPage from './seo-pages/ParlayCalculatorPage.jsx'
+import SharpBettingPage from './seo-pages/SharpBettingPage.jsx'
+import BettingAlertsPage from './seo-pages/BettingAlertsPage.jsx'
+import LiveScoresPage from './seo-pages/LiveScoresPage.jsx'
+
+export default function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<App />} />
+      <Route path="/ev-betting" element={<EvBettingPage />} />
+      <Route path="/odds-comparison" element={<OddsComparisonPage />} />
+      <Route path="/parlay-calculator" element={<ParlayCalculatorPage />} />
+      <Route path="/sharp-betting" element={<SharpBettingPage />} />
+      <Route path="/betting-alerts" element={<BettingAlertsPage />} />
+      <Route path="/live-scores" element={<LiveScoresPage />} />
+    </Routes>
+  )
+}

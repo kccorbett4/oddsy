@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --ssr src/entry-server.jsx --outDir dist/server && node prerender.js",
+    "build:client": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-helmet-async": "^3.0.0",
+    "react-router-dom": "^7.14.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

@@ -673,7 +673,7 @@ export default function App() {
   const [wagerAmount, setWagerAmount] = useState(25);
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState("loading");
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
   const [liveScores, setLiveScores] = useState([]);
   const [sharpPlays, setSharpPlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
