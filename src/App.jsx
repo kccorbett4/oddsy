@@ -355,6 +355,338 @@ const findSharpPlays = (games, liveScores) => {
   return plays.sort((a, b) => b.totalScore - a.totalScore).slice(0, 50);
 };
 
+// ── Stale Line Detector ─────────────────────────────────
+// Finds books where the line hasn't moved with the rest of the market
+const findStaleLines = (games, liveScores) => {
+  const stale = [];
+  games.forEach(game => {
+    const status = getGameStatus(game, liveScores);
+    if (status === "final" || status === "blowout") return;
+    const isLive = status === "in_progress";
+
+    ["h2h", "spreads", "totals"].forEach(marketType => {
+      const allOutcomes = {};
+      game.bookmakers.forEach(book => {
+        const market = book.markets.find(m => m.key === marketType);
+        if (!market) return;
+        market.outcomes.forEach(outcome => {
+          const key = `${outcome.name}_${outcome.point || ''}`;
+          if (!allOutcomes[key]) allOutcomes[key] = [];
+          allOutcomes[key].push({ ...outcome, book: book.title });
+        });
+      });
+
+      Object.entries(allOutcomes).forEach(([, outcomes]) => {
+        if (outcomes.length < 4) return; // need enough books for consensus
+        const prices = outcomes.map(o => o.price);
+        const sorted = [...prices].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+
+        outcomes.forEach(outcome => {
+          const diff = Math.abs(outcome.price - median);
+          const booksAtMedian = prices.filter(p => Math.abs(p - median) < 10).length;
+          const consensusRatio = booksAtMedian / prices.length;
+
+          // Stale = this book is far from median while most others agree
+          if (diff >= 12 && consensusRatio >= 0.6) {
+            const staleScore = (diff / 100) * consensusRatio * 10;
+            const isBetterOdds = outcome.price > median; // better for bettor
+            stale.push({
+              game, marketType, isLive,
+              outcome: outcome.name,
+              point: outcome.point,
+              staleBook: outcome.book,
+              staleOdds: outcome.price,
+              marketMedian: median,
+              diff: Math.round(diff),
+              consensusPct: Math.round(consensusRatio * 100),
+              booksAgreed: booksAtMedian,
+              totalBooks: prices.length,
+              staleScore: parseFloat(staleScore.toFixed(2)),
+              isBetterOdds,
+              commence: game.commence_time,
+              allBookOdds: outcomes.map(o => ({ book: o.book, odds: o.price })),
+            });
+          }
+        });
+      });
+    });
+  });
+  return stale
+    .filter(s => s.isBetterOdds) // only show stale lines that benefit the bettor
+    .sort((a, b) => b.staleScore - a.staleScore)
+    .slice(0, 30);
+};
+
+// ── Reverse Line Movement Detector ──────────────────────
+// Finds games where sharp money likely moved some books but not all
+const findRLMPlays = (games, liveScores) => {
+  const plays = [];
+  games.forEach(game => {
+    const status = getGameStatus(game, liveScores);
+    if (status === "final" || status === "blowout" || status === "in_progress") return;
+
+    ["spreads", "h2h"].forEach(marketType => {
+      const allOutcomes = {};
+      game.bookmakers.forEach(book => {
+        const market = book.markets.find(m => m.key === marketType);
+        if (!market) return;
+        market.outcomes.forEach(outcome => {
+          const key = `${outcome.name}_${outcome.point || ''}`;
+          if (!allOutcomes[key]) allOutcomes[key] = [];
+          allOutcomes[key].push({ ...outcome, book: book.title });
+        });
+      });
+
+      Object.entries(allOutcomes).forEach(([, outcomes]) => {
+        if (outcomes.length < 4) return;
+        const prices = outcomes.map(o => o.price);
+        const sorted = [...prices].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const range = sorted[sorted.length - 1] - sorted[0];
+
+        if (range < 15) return; // need meaningful spread across books
+
+        // Find the side where sharp money may have moved (lower odds = more action)
+        const sharpSide = outcomes.filter(o => o.price < median - 5);
+        const publicSide = outcomes.filter(o => o.price >= median);
+
+        if (sharpSide.length >= 1 && publicSide.length >= 2) {
+          // Sharp books have lower odds (took action and adjusted)
+          // Public books still have higher odds (haven't adjusted)
+          const bestPublicOdds = publicSide.reduce((best, o) => o.price > best.price ? o : best, publicSide[0]);
+          const avgSharp = sharpSide.reduce((a, o) => a + o.price, 0) / sharpSide.length;
+          const rlmScore = ((bestPublicOdds.price - avgSharp) / 100) * (publicSide.length / outcomes.length) * 10;
+
+          if (rlmScore > 0.3) {
+            plays.push({
+              game, marketType,
+              outcome: bestPublicOdds.name,
+              point: bestPublicOdds.point,
+              bestBook: bestPublicOdds.book,
+              bestOdds: bestPublicOdds.price,
+              sharpBooks: sharpSide.map(o => ({ book: o.book, odds: o.price })),
+              publicBooks: publicSide.map(o => ({ book: o.book, odds: o.price })),
+              rlmScore: parseFloat(rlmScore.toFixed(2)),
+              lineRange: range,
+              commence: game.commence_time,
+            });
+          }
+        }
+      });
+    });
+  });
+  return plays.sort((a, b) => b.rlmScore - a.rlmScore).slice(0, 20);
+};
+
+// ── Correlated Parlays ──────────────────────────────────
+// Finds same-game parlay legs that are logically correlated
+const findCorrelatedParlays = (games, liveScores) => {
+  const correlated = [];
+  games.forEach(game => {
+    const status = getGameStatus(game, liveScores);
+    if (status === "final" || status === "blowout" || status === "in_progress") return;
+
+    const getMarketOutcomes = (marketType) => {
+      const outcomes = {};
+      game.bookmakers.forEach(book => {
+        const market = book.markets.find(m => m.key === marketType);
+        if (!market) return;
+        market.outcomes.forEach(o => {
+          const key = `${o.name}_${o.point || ''}`;
+          if (!outcomes[key]) outcomes[key] = [];
+          outcomes[key].push({ ...o, book: book.title });
+        });
+      });
+      // Return best odds for each outcome
+      const best = {};
+      Object.entries(outcomes).forEach(([key, os]) => {
+        const sorted = os.sort((a, b) => b.price - a.price);
+        best[key] = sorted[0]; // highest payout
+      });
+      return best;
+    };
+
+    const h2h = getMarketOutcomes("h2h");
+    const totals = getMarketOutcomes("totals");
+    const spreads = getMarketOutcomes("spreads");
+
+    // Find the favorite and underdog
+    const h2hEntries = Object.entries(h2h);
+    if (h2hEntries.length < 2) return;
+    const [team1Entry, team2Entry] = h2hEntries;
+    const favorite = team1Entry[1].price < team2Entry[1].price ? team1Entry : team2Entry;
+    const underdog = team1Entry[1].price >= team2Entry[1].price ? team1Entry : team2Entry;
+
+    const overEntry = Object.entries(totals).find(([k]) => k.startsWith("Over"));
+    const underEntry = Object.entries(totals).find(([k]) => k.startsWith("Under"));
+
+    if (!overEntry || !underEntry) return;
+
+    // Correlation 1: Favorite ML + Over
+    // If the favorite wins, they likely scored a lot → over more likely
+    const combineDecimal = (o1, o2) => {
+      const d1 = o1.price > 0 ? (o1.price / 100) + 1 : (100 / Math.abs(o1.price)) + 1;
+      const d2 = o2.price > 0 ? (o2.price / 100) + 1 : (100 / Math.abs(o2.price)) + 1;
+      return d1 * d2;
+    };
+
+    const addCombo = (leg1Label, leg1, leg2Label, leg2, reason, strength) => {
+      const combined = combineDecimal(leg1, leg2);
+      const combinedAmerican = combined >= 2 ? Math.round((combined - 1) * 100) : Math.round(-100 / (combined - 1));
+      correlated.push({
+        game,
+        leg1: { label: leg1Label, ...leg1 },
+        leg2: { label: leg2Label, ...leg2 },
+        reason,
+        strength,
+        combinedOdds: combinedAmerican,
+        combinedDecimal: combined.toFixed(2),
+        commence: game.commence_time,
+      });
+    };
+
+    // Favorite ML + Over (strong correlation)
+    addCombo(
+      `${favorite[1].name} ML`, favorite[1],
+      `Over ${overEntry[1].point}`, overEntry[1],
+      "If the favorite wins comfortably, total points tend to go over",
+      "strong"
+    );
+
+    // Underdog ML + Under (moderate correlation)
+    addCombo(
+      `${underdog[1].name} ML`, underdog[1],
+      `Under ${underEntry[1].point}`, underEntry[1],
+      "Underdog wins are often low-scoring, grind-it-out games",
+      "moderate"
+    );
+
+    // Underdog spread + Under (moderate)
+    const dogSpread = Object.entries(spreads).find(([k]) => k.startsWith(underdog[1].name));
+    if (dogSpread) {
+      addCombo(
+        `${underdog[1].name} ${dogSpread[1].point > 0 ? '+' : ''}${dogSpread[1].point}`, dogSpread[1],
+        `Under ${underEntry[1].point}`, underEntry[1],
+        "Underdog covers are more likely in lower-scoring games",
+        "moderate"
+      );
+    }
+
+    // Favorite spread + Over (moderate)
+    const favSpread = Object.entries(spreads).find(([k]) => k.startsWith(favorite[1].name));
+    if (favSpread) {
+      addCombo(
+        `${favorite[1].name} ${favSpread[1].point > 0 ? '+' : ''}${favSpread[1].point}`, favSpread[1],
+        `Over ${overEntry[1].point}`, overEntry[1],
+        "Favorite covers are more common in high-scoring games",
+        "moderate"
+      );
+    }
+  });
+
+  return correlated.sort((a, b) => {
+    const s = { strong: 3, moderate: 2, weak: 1 };
+    return (s[b.strength] || 0) - (s[a.strength] || 0);
+  }).slice(0, 30);
+};
+
+// ── Narrative Regression ────────────────────────────────
+// Finds teams coming off blowout results that may be over/undervalued
+const findNarrativePlays = (games, liveScores) => {
+  const plays = [];
+  if (!liveScores || liveScores.length === 0) return plays;
+
+  // Find teams with blowout results (finished games)
+  const blowoutTeams = new Set();
+  const blowoutDetails = {};
+  liveScores.forEach(event => {
+    if (event.status.type !== "STATUS_FINAL") return;
+    const diff = Math.abs(event.home.score - event.away.score);
+    const loser = event.home.score < event.away.score ? event.home.name : event.away.name;
+    const winner = event.home.score > event.away.score ? event.home.name : event.away.name;
+
+    // Blowout thresholds by sport
+    let isBlowout = false;
+    if (diff >= 20) isBlowout = true; // NBA/NCAAB
+    if (diff >= 17) isBlowout = true; // NFL
+    if (diff >= 6) isBlowout = true;  // MLB/NHL
+
+    if (isBlowout) {
+      blowoutTeams.add(loser.toLowerCase());
+      blowoutDetails[loser.toLowerCase()] = {
+        opponent: winner,
+        score: `${event.away.score}-${event.home.score}`,
+        margin: diff,
+        team: loser,
+      };
+    }
+  });
+
+  if (blowoutTeams.size === 0) return plays;
+
+  // Find upcoming games featuring blowout losers
+  games.forEach(game => {
+    const status = getGameStatus(game, liveScores);
+    if (status === "final" || status === "blowout" || status === "in_progress") return;
+
+    const homeNorm = game.home_team.toLowerCase();
+    const awayNorm = game.away_team.toLowerCase();
+
+    let blowoutTeam = null;
+    let blowoutInfo = null;
+    for (const [teamName, info] of Object.entries(blowoutDetails)) {
+      if (homeNorm.includes(teamName) || teamName.includes(homeNorm)) {
+        blowoutTeam = game.home_team;
+        blowoutInfo = info;
+        break;
+      }
+      if (awayNorm.includes(teamName) || teamName.includes(awayNorm)) {
+        blowoutTeam = game.away_team;
+        blowoutInfo = info;
+        break;
+      }
+    }
+
+    if (!blowoutTeam || !blowoutInfo) return;
+
+    // Get the spread for the blowout team
+    const spreadsData = {};
+    game.bookmakers.forEach(book => {
+      const market = book.markets.find(m => m.key === "spreads");
+      if (!market) return;
+      market.outcomes.forEach(o => {
+        if (o.name === blowoutTeam) {
+          if (!spreadsData[o.name]) spreadsData[o.name] = [];
+          spreadsData[o.name].push({ ...o, book: book.title });
+        }
+      });
+    });
+
+    const teamSpreads = spreadsData[blowoutTeam];
+    if (!teamSpreads || teamSpreads.length === 0) return;
+
+    // Find best spread for the blowout loser (public likely overreacting)
+    const bestSpread = teamSpreads.sort((a, b) => b.point - a.point)[0]; // highest point spread = most value
+
+    if (bestSpread.point > 0) {
+      // They're an underdog — this is the narrative regression play
+      plays.push({
+        game,
+        blowoutTeam,
+        blowoutInfo,
+        bestBook: bestSpread.book,
+        bestSpread: bestSpread.point,
+        bestOdds: bestSpread.price,
+        allSpreads: teamSpreads.map(s => ({ book: s.book, spread: s.point, odds: s.price })),
+        commence: game.commence_time,
+      });
+    }
+  });
+
+  return plays.sort((a, b) => b.bestSpread - a.bestSpread);
+};
+
 const formatOdds = (odds) => (odds > 0 ? `+${odds}` : `${odds}`);
 
 const formatTime = (iso) => {
@@ -677,6 +1009,10 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
   const [liveScores, setLiveScores] = useState([]);
   const [sharpPlays, setSharpPlays] = useState([]);
+  const [staleLines, setStaleLines] = useState([]);
+  const [rlmPlays, setRlmPlays] = useState([]);
+  const [correlatedParlays, setCorrelatedParlays] = useState([]);
+  const [narrativePlays, setNarrativePlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
@@ -721,6 +1057,10 @@ export default function App() {
             setValueBets(vb);
             setParlays(generateParlays(vb));
             setSharpPlays(findSharpPlays(cachedData, liveScores));
+            setStaleLines(findStaleLines(cachedData, liveScores));
+            setRlmPlays(findRLMPlays(cachedData, liveScores));
+            setCorrelatedParlays(findCorrelatedParlays(cachedData, liveScores));
+            setNarrativePlays(findNarrativePlays(cachedData, liveScores));
             setDataSource("live");
             setLastRefresh(new Date(timestamp));
             setLoading(false);
@@ -739,6 +1079,10 @@ export default function App() {
           setValueBets(vb);
           setParlays(generateParlays(vb));
           setSharpPlays(findSharpPlays(json.games, liveScores));
+          setStaleLines(findStaleLines(json.games, liveScores));
+          setRlmPlays(findRLMPlays(json.games, liveScores));
+          setCorrelatedParlays(findCorrelatedParlays(json.games, liveScores));
+          setNarrativePlays(findNarrativePlays(json.games, liveScores));
           setDataSource("live");
           // Cache the response
           localStorage.setItem(CACHE_KEY, JSON.stringify({ data: json.games, timestamp: Date.now() }));
@@ -750,6 +1094,10 @@ export default function App() {
         setValueBets([]);
         setParlays([]);
         setSharpPlays([]);
+        setStaleLines([]);
+        setRlmPlays([]);
+        setCorrelatedParlays([]);
+        setNarrativePlays([]);
         setDataSource("error");
       }
       setLastRefresh(new Date());
@@ -788,6 +1136,10 @@ export default function App() {
       setValueBets(vb);
       setParlays(generateParlays(vb));
       setSharpPlays(findSharpPlays(games, liveScores));
+      setStaleLines(findStaleLines(games, liveScores));
+      setRlmPlays(findRLMPlays(games, liveScores));
+      setCorrelatedParlays(findCorrelatedParlays(games, liveScores));
+      setNarrativePlays(findNarrativePlays(games, liveScores));
     }
   }, [liveScores]);
 
@@ -910,34 +1262,37 @@ export default function App() {
           gap: 8,
         }}>
           {[
-            { to: "/reverse-line-movement", title: "Reverse Line Movement", sub: "Sharp money vs. public", color: "#7c3aed", icon: "🔄" },
-            { to: "/correlated-parlays", title: "Correlated Parlays", sub: "Legs that move together", color: "#0d9f4f", icon: "🔗" },
-            { to: "/stale-line-detector", title: "Stale Line Detector", sub: "Bet the slow book", color: "#dc2626", icon: "⏱️" },
-            { to: "/narrative-regression", title: "Narrative Regression", sub: "Fade the overreaction", color: "#d97706", icon: "📉" },
+            { id: "rlm", title: "Reverse Line Movement", sub: `${rlmPlays.length} plays`, color: "#7c3aed", icon: "🔄" },
+            { id: "correlated", title: "Correlated Parlays", sub: `${correlatedParlays.length} combos`, color: "#0d9f4f", icon: "🔗" },
+            { id: "stale", title: "Stale Line Detector", sub: `${staleLines.length} stale`, color: "#dc2626", icon: "⏱️" },
+            { id: "narrative", title: "Narrative Regression", sub: `${narrativePlays.length} plays`, color: "#d97706", icon: "📉" },
           ].map(tool => (
-            <Link
-              key={tool.to}
-              to={tool.to}
+            <button
+              key={tool.id}
+              onClick={() => setActiveTab(tool.id)}
               style={{
-                background: "#fff",
-                border: "1px solid #e2e5ea",
+                background: activeTab === tool.id ? `${tool.color}10` : "#fff",
+                border: activeTab === tool.id ? `1px solid ${tool.color}` : "1px solid #e2e5ea",
                 borderRadius: 12,
                 padding: isMobile ? "12px 10px" : "14px 16px",
                 textDecoration: "none",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                boxShadow: activeTab === tool.id ? `0 2px 8px ${tool.color}20` : "0 1px 3px rgba(0,0,0,0.06)",
                 borderLeft: `3px solid ${tool.color}`,
-                transition: "box-shadow 0.2s",
+                transition: "all 0.2s",
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                textAlign: "left",
               }}
             >
               <span style={{ fontSize: isMobile ? 20 : 24, lineHeight: 1, flexShrink: 0 }}>{tool.icon}</span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: "#1a1d23", lineHeight: 1.3 }}>{tool.title}</div>
-                <div style={{ fontSize: isMobile ? 9 : 11, color: "#8b919a", marginTop: 2 }}>{tool.sub}</div>
+                <div style={{ fontSize: isMobile ? 9 : 11, color: tool.color, marginTop: 2, fontWeight: 600 }}>{tool.sub}</div>
               </div>
-            </Link>
+            </button>
           ))}
         </div>
       </div>
@@ -1806,6 +2161,340 @@ export default function App() {
           </>
         )}
 
+        {/* ── STALE LINE DETECTOR TAB ── */}
+        {activeTab === "stale" && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Stale Line Detector</div>
+              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Lines where one book hasn't caught up to the market consensus. These are genuine +EV opportunities — bet before they correct.</div>
+            </div>
+
+            {staleLines.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
+                <div style={{ fontSize: 13 }}>No stale lines detected right now. Check back when more games are on the board.</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {staleLines.filter(s => activeSport === "all" || s.game.sport_key === activeSport).map((sl, i) => {
+                const sportIcon = SPORTS.find(s => s.id === sl.game.sport_key)?.icon || "";
+                const marketLabel = sl.marketType === "h2h" ? "Moneyline" : sl.marketType === "spreads" ? "Spread" : "Total";
+                return (
+                  <div key={`stale-${i}`} style={{
+                    background: "#fff", border: "1px solid #fecaca", borderLeft: "3px solid #dc2626",
+                    borderRadius: 12, overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
+                  }}>
+                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
+                            {sl.outcome} {sl.point ? `(${sl.point > 0 ? '+' : ''}${sl.point})` : ''} — {marketLabel}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                            {sportIcon} {sl.game.away_team} @ {sl.game.home_team} · {formatTime(sl.commence)}
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                          background: "#fef2f2", color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.05em",
+                        }}>STALE</div>
+                      </div>
+                    </div>
+                    <div style={{ padding: "10px 16px", background: "#fefaf0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Stale Book</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: "#dc2626", fontFamily: "'Space Mono', monospace" }}>
+                            {formatOdds(sl.staleOdds)} <span style={{ fontSize: 12, fontWeight: 600 }}>on {sl.staleBook}</span>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Market Median</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: "#4a5568", fontFamily: "'Space Mono', monospace" }}>
+                            {formatOdds(sl.marketMedian)}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        {sl.booksAgreed}/{sl.totalBooks} books agree on the consensus · {sl.diff} pts off market
+                      </div>
+                    </div>
+                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ fontSize: 11, color: "#8b919a" }}>
+                        All books: {sl.allBookOdds.map(b => `${b.book} ${formatOdds(b.odds)}`).join(" · ")}
+                      </div>
+                      <a href={BOOK_URLS[sl.staleBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
+                        padding: "6px 12px", borderRadius: 8, background: "#dc2626", color: "#fff",
+                        fontSize: 11, fontWeight: 700, textDecoration: "none",
+                      }}>Bet on {sl.staleBook} →</a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Link to="/stale-line-detector" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how stale line detection works →</Link>
+            </div>
+          </>
+        )}
+
+        {/* ── REVERSE LINE MOVEMENT TAB ── */}
+        {activeTab === "rlm" && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Reverse Line Movement</div>
+              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Games where sharp money has moved some books but the public side still offers better odds elsewhere. Bet with the sharp books, at the public price.</div>
+            </div>
+
+            {rlmPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🔄</div>
+                <div style={{ fontSize: 13 }}>No reverse line movement detected. Check back closer to game time.</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {rlmPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).map((play, i) => {
+                const sportIcon = SPORTS.find(s => s.id === play.game.sport_key)?.icon || "";
+                const marketLabel = play.marketType === "h2h" ? "Moneyline" : "Spread";
+                return (
+                  <div key={`rlm-${i}`} style={{
+                    background: "#fff", border: "1px solid #ddd0f5", borderLeft: "3px solid #7c3aed",
+                    borderRadius: 12, overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
+                  }}>
+                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
+                            {play.outcome} {play.point ? `(${play.point > 0 ? '+' : ''}${play.point})` : ''} — {marketLabel}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                            {sportIcon} {play.game.away_team} @ {play.game.home_team} · {formatTime(play.commence)}
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                          background: "#f3edff", color: "#7c3aed", textTransform: "uppercase",
+                        }}>RLM</div>
+                      </div>
+                    </div>
+                    <div style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", gap: 20, marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Best Available</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
+                            {formatOdds(play.bestOdds)}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>on {play.bestBook}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Line Range</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: "#4a5568", fontFamily: "'Space Mono', monospace" }}>
+                            {play.lineRange} pts
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>spread across books</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>
+                        <strong style={{ color: "#7c3aed" }}>Sharp side:</strong> {play.sharpBooks.map(b => `${b.book} (${formatOdds(b.odds)})`).join(", ")}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        <strong style={{ color: "#1a73e8" }}>Public side:</strong> {play.publicBooks.map(b => `${b.book} (${formatOdds(b.odds)})`).join(", ")}
+                      </div>
+                    </div>
+                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", textAlign: "right" }}>
+                      <a href={BOOK_URLS[play.bestBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
+                        padding: "6px 12px", borderRadius: 8, background: "#7c3aed", color: "#fff",
+                        fontSize: 11, fontWeight: 700, textDecoration: "none",
+                      }}>Bet on {play.bestBook} →</a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Link to="/reverse-line-movement" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how reverse line movement works →</Link>
+            </div>
+          </>
+        )}
+
+        {/* ── CORRELATED PARLAYS TAB ── */}
+        {activeTab === "correlated" && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Correlated Parlays</div>
+              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Same-game parlay legs that are logically correlated — when one hits, the other is more likely to hit too. Sportsbooks underprice these correlations.</div>
+            </div>
+
+            {correlatedParlays.filter(c => activeSport === "all" || c.game.sport_key === activeSport).length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🔗</div>
+                <div style={{ fontSize: 13 }}>No correlated parlays found. Check back when more games are available.</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {correlatedParlays.filter(c => activeSport === "all" || c.game.sport_key === activeSport).map((combo, i) => {
+                const sportIcon = SPORTS.find(s => s.id === combo.game.sport_key)?.icon || "";
+                return (
+                  <div key={`corr-${i}`} style={{
+                    background: "#fff", border: "1px solid #c6f6d5", borderLeft: "3px solid #0d9f4f",
+                    borderRadius: 12, overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
+                  }}>
+                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>
+                          {sportIcon} {combo.game.away_team} @ {combo.game.home_team} · {formatTime(combo.commence)}
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                        background: combo.strength === "strong" ? "#ecfdf5" : "#fffff0",
+                        color: combo.strength === "strong" ? "#0d9f4f" : "#d69e2e",
+                        textTransform: "uppercase",
+                      }}>{combo.strength}</div>
+                    </div>
+                    <div style={{ padding: "12px 16px" }}>
+                      {/* Two legs */}
+                      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                        <div style={{ flex: 1, background: "#f8faf8", borderRadius: 8, padding: "10px 12px" }}>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Leg 1</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>{combo.leg1.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: combo.leg1.price > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
+                            {formatOdds(combo.leg1.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>({combo.leg1.book})</span>
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, background: "#f8faf8", borderRadius: 8, padding: "10px 12px" }}>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Leg 2</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>{combo.leg2.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: combo.leg2.price > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
+                            {formatOdds(combo.leg2.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>({combo.leg2.book})</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.5, fontStyle: "italic" }}>{combo.reason}</div>
+                    </div>
+                    <div style={{ padding: "10px 16px", borderTop: "1px solid #e2e5ea", background: "#f8f9fa", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Combined Odds</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
+                          {formatOdds(combo.combinedOdds)}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {["DraftKings", "FanDuel"].map(book => (
+                          <a key={book} href={BOOK_URLS[book]} target="_blank" rel="noopener noreferrer" style={{
+                            padding: "6px 12px", borderRadius: 8, background: "#0d9f4f", color: "#fff",
+                            fontSize: 11, fontWeight: 700, textDecoration: "none",
+                          }}>Build on {book} →</a>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Link to="/correlated-parlays" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how correlated parlays work →</Link>
+            </div>
+          </>
+        )}
+
+        {/* ── NARRATIVE REGRESSION TAB ── */}
+        {activeTab === "narrative" && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Narrative Regression</div>
+              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Teams that just got blown out are undervalued by the public. When the underlying quality hasn't changed, bet the correction.</div>
+            </div>
+
+            {narrativePlays.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📉</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6 }}>No narrative regression plays right now. This requires a team to have recently suffered a blowout loss with upcoming games on the board.</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {narrativePlays.map((play, i) => {
+                const sportIcon = SPORTS.find(s => s.id === play.game.sport_key)?.icon || "";
+                return (
+                  <div key={`narr-${i}`} style={{
+                    background: "#fff", border: "1px solid #feebc8", borderLeft: "3px solid #d97706",
+                    borderRadius: 12, overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
+                  }}>
+                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
+                            {play.blowoutTeam} +{play.bestSpread}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                            {sportIcon} {play.game.away_team} @ {play.game.home_team} · {formatTime(play.commence)}
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                          background: "#fffff0", color: "#d97706", textTransform: "uppercase",
+                        }}>OVERREACTION</div>
+                      </div>
+                    </div>
+                    <div style={{ padding: "12px 16px" }}>
+                      <div style={{
+                        background: "#fff8f0", borderRadius: 8, padding: "10px 14px", marginBottom: 10,
+                        border: "1px solid #feebc8",
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#d97706", marginBottom: 4 }}>Recent Blowout</div>
+                        <div style={{ fontSize: 13, color: "#4a5568" }}>
+                          {play.blowoutInfo.team} lost to {play.blowoutInfo.opponent} ({play.blowoutInfo.score}) — margin of {play.blowoutInfo.margin}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 20 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Best Spread</div>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
+                            +{play.bestSpread}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>on {play.bestBook}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Odds</div>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d23", fontFamily: "'Space Mono', monospace" }}>
+                            {formatOdds(play.bestOdds)}
+                          </div>
+                        </div>
+                      </div>
+                      {play.allSpreads.length > 1 && (
+                        <div style={{ fontSize: 11, color: "#8b919a", marginTop: 8 }}>
+                          All books: {play.allSpreads.map(s => `${s.book} +${s.spread} (${formatOdds(s.odds)})`).join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", textAlign: "right" }}>
+                      <a href={BOOK_URLS[play.bestBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
+                        padding: "6px 12px", borderRadius: 8, background: "#d97706", color: "#fff",
+                        fontSize: 11, fontWeight: 700, textDecoration: "none",
+                      }}>Bet on {play.bestBook} →</a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Link to="/narrative-regression" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how narrative regression works →</Link>
+            </div>
+          </>
+        )}
+
         {/* ── GUIDES TAB ── */}
         {activeTab === "guides" && (
           <>
@@ -1884,9 +2573,13 @@ export default function App() {
                 <div style={{ width: 40, height: 4, background: "#4a5568", borderRadius: 2, margin: "0 auto 20px" }} />
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {[
+                    { id: "stale", label: "Stale Line Detector", icon: "⏱️", desc: "Lines where one book hasn't caught up" },
+                    { id: "rlm", label: "Reverse Line Movement", icon: "🔄", desc: "Sharp money vs. public money" },
+                    { id: "correlated", label: "Correlated Parlays", icon: "🔗", desc: "Same-game legs that move together" },
+                    { id: "narrative", label: "Narrative Regression", icon: "📉", desc: "Fade the overreaction" },
                     { id: "scores", label: "Live Scores", icon: "🏆", desc: "Real-time scores & today's games" },
                     { id: "alerts", label: "Betting Alerts", icon: "🔔", desc: "Set alerts for value opportunities" },
-                    { id: "guides", label: "Strategy Guides", icon: "📚", desc: "In-depth betting strategy breakdowns" },
+                    { id: "guides", label: "Strategy Guides", icon: "📚", desc: "In-depth strategy breakdowns" },
                   ].map(item => (
                     <button
                       key={item.id}
@@ -1931,7 +2624,7 @@ export default function App() {
               { id: "odds", label: "Odds", icon: "📊" },
               { id: "more", label: "More", icon: "☰" },
             ].map(tab => {
-              const isMoreActive = tab.id === "more" && ["scores", "alerts", "guides"].includes(activeTab);
+              const isMoreActive = tab.id === "more" && ["scores", "alerts", "guides", "stale", "rlm", "correlated", "narrative"].includes(activeTab);
               const isActive = tab.id === "more" ? isMoreActive : activeTab === tab.id;
               return (
               <button
