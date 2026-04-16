@@ -6,6 +6,10 @@ import ParlayCalculatorPage from './seo-pages/ParlayCalculatorPage.jsx'
 import SharpBettingPage from './seo-pages/SharpBettingPage.jsx'
 import BettingAlertsPage from './seo-pages/BettingAlertsPage.jsx'
 import LiveScoresPage from './seo-pages/LiveScoresPage.jsx'
+import ReverseLineMovementPage from './seo-pages/ReverseLineMovementPage.jsx'
+import CorrelationParlayPage from './seo-pages/CorrelationParlayPage.jsx'
+import StaleLineDetectorPage from './seo-pages/StaleLineDetectorPage.jsx'
+import NarrativeRegressionPage from './seo-pages/NarrativeRegressionPage.jsx'
 
 export default function AppRoutes() {
   return (
@@ -17,6 +21,10 @@ export default function AppRoutes() {
       <Route path="/sharp-betting" element={<SharpBettingPage />} />
       <Route path="/betting-alerts" element={<BettingAlertsPage />} />
       <Route path="/live-scores" element={<LiveScoresPage />} />
+      <Route path="/reverse-line-movement" element={<ReverseLineMovementPage />} />
+      <Route path="/correlated-parlays" element={<CorrelationParlayPage />} />
+      <Route path="/stale-line-detector" element={<StaleLineDetectorPage />} />
+      <Route path="/narrative-regression" element={<NarrativeRegressionPage />} />
     </Routes>
   )
 }

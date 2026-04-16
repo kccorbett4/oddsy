@@ -7,5 +7,9 @@ export function getAllPaths() {
     '/sharp-betting',
     '/betting-alerts',
     '/live-scores',
+    '/reverse-line-movement',
+    '/correlated-parlays',
+    '/stale-line-detector',
+    '/narrative-regression',
   ];
 }
