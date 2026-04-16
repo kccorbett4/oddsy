@@ -678,6 +678,7 @@ export default function App() {
   const [liveScores, setLiveScores] = useState([]);
   const [sharpPlays, setSharpPlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
   const [geoLoaded, setGeoLoaded] = useState(false);
 
@@ -857,8 +858,8 @@ export default function App() {
             { id: "value", label: "Value Bets", icon: "⚡" },
             { id: "parlays", label: "Parlays", icon: "🎰" },
             { id: "odds", label: "Odds", icon: "📊" },
-            { id: "alerts", label: "Alerts", icon: "🔔" },
             { id: "scores", label: "Scores", icon: "🏆" },
+            { id: "alerts", label: "Alerts", icon: "🔔" },
             { id: "guides", label: "Guides", icon: "📚" },
           ].map(tab => (
             <button
@@ -1284,6 +1285,13 @@ export default function App() {
               </a>
               <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
             </div>
+
+            {/* Related guides */}
+            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link to="/sharp-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn Sharp Betting →</Link>
+              <Link to="/reverse-line-movement" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Reverse Line Movement →</Link>
+              <Link to="/ev-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>EV Betting Guide →</Link>
+            </div>
           </>
         )}
 
@@ -1363,6 +1371,13 @@ export default function App() {
                 Claim Bonus →
               </a>
               <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+            </div>
+
+            {/* Related guides */}
+            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link to="/ev-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>EV Betting Guide →</Link>
+              <Link to="/odds-comparison" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Odds Comparison →</Link>
+              <Link to="/stale-line-detector" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Stale Line Detector →</Link>
             </div>
           </>
         )}
@@ -1600,6 +1615,12 @@ export default function App() {
               <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
             </div>
 
+            {/* Related guides */}
+            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link to="/parlay-calculator" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Parlay Strategy Guide →</Link>
+              <Link to="/correlated-parlays" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Correlated Parlays →</Link>
+              <Link to="/narrative-regression" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Narrative Regression →</Link>
+            </div>
           </>
         )}
 
@@ -1798,55 +1819,108 @@ export default function App() {
 
       {/* ── MOBILE BOTTOM TAB BAR ── */}
       {isMobile && (
-        <nav style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: "#1a1d23",
-          borderTop: "2px solid #2d3748",
-          display: "flex",
-          zIndex: 900,
-          padding: "8px 6px 4px",
-          paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
-          boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
-        }}>
-          {[
-            { id: "sharp", label: "Sharp", icon: "🧠" },
-            { id: "value", label: "Value", icon: "⚡" },
-            { id: "parlays", label: "Parlays", icon: "🎰" },
-            { id: "odds", label: "Odds", icon: "📊" },
-            { id: "alerts", label: "Alerts", icon: "🔔" },
-            { id: "scores", label: "Scores", icon: "🏆" },
-            { id: "guides", label: "Guides", icon: "📚" },
-          ].map(tab => {
-            const isActive = activeTab === tab.id;
-            return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+        <>
+          {/* More menu overlay */}
+          {showMoreMenu && (
+            <div
               style={{
-                flex: 1,
-                padding: "8px 2px 6px",
-                border: "none",
-                background: isActive ? "#1a73e8" : "transparent",
-                borderRadius: 12,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 3,
-                cursor: "pointer",
-                color: isActive ? "#fff" : "#6b7280",
-                transition: "all 0.2s",
-                fontFamily: "'DM Sans', sans-serif",
+                position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+                background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+                zIndex: 950,
               }}
+              onClick={() => setShowMoreMenu(false)}
             >
-              <span style={{ fontSize: 22, lineHeight: 1 }}>{tab.icon}</span>
-              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.02em" }}>{tab.label}</span>
-            </button>
-            );
-          })}
-        </nav>
+              <div
+                style={{
+                  position: "absolute", bottom: 0, left: 0, right: 0,
+                  background: "#1a1d23", borderRadius: "20px 20px 0 0",
+                  padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))",
+                  boxShadow: "0 -8px 32px rgba(0,0,0,0.4)",
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{ width: 40, height: 4, background: "#4a5568", borderRadius: 2, margin: "0 auto 20px" }} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {[
+                    { id: "scores", label: "Live Scores", icon: "🏆", desc: "Real-time scores & today's games" },
+                    { id: "alerts", label: "Betting Alerts", icon: "🔔", desc: "Set alerts for value opportunities" },
+                    { id: "guides", label: "Strategy Guides", icon: "📚", desc: "In-depth betting strategy breakdowns" },
+                  ].map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => { setActiveTab(item.id); setShowMoreMenu(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 14,
+                        padding: "14px 16px", borderRadius: 12,
+                        border: "none", background: activeTab === item.id ? "#1a73e8" : "rgba(255,255,255,0.06)",
+                        cursor: "pointer", textAlign: "left", width: "100%",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      <span style={{ fontSize: 26, lineHeight: 1 }}>{item.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{item.label}</div>
+                        <div style={{ fontSize: 11, color: activeTab === item.id ? "#c5d7f5" : "#8b919a", marginTop: 2 }}>{item.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <nav style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: "#1a1d23",
+            borderTop: "2px solid #2d3748",
+            display: "flex",
+            zIndex: 900,
+            padding: "8px 6px 4px",
+            paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+            boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
+          }}>
+            {[
+              { id: "sharp", label: "Sharp", icon: "🧠" },
+              { id: "value", label: "Value", icon: "⚡" },
+              { id: "parlays", label: "Parlays", icon: "🎰" },
+              { id: "odds", label: "Odds", icon: "📊" },
+              { id: "more", label: "More", icon: "☰" },
+            ].map(tab => {
+              const isMoreActive = tab.id === "more" && ["scores", "alerts", "guides"].includes(activeTab);
+              const isActive = tab.id === "more" ? isMoreActive : activeTab === tab.id;
+              return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  if (tab.id === "more") { setShowMoreMenu(m => !m); }
+                  else { setActiveTab(tab.id); setShowMoreMenu(false); }
+                }}
+                style={{
+                  flex: 1,
+                  padding: "8px 2px 6px",
+                  border: "none",
+                  background: isActive ? "#1a73e8" : "transparent",
+                  borderRadius: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 3,
+                  cursor: "pointer",
+                  color: isActive ? "#fff" : "#6b7280",
+                  transition: "all 0.2s",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <span style={{ fontSize: 22, lineHeight: 1 }}>{tab.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.02em" }}>{tab.label}</span>
+              </button>
+              );
+            })}
+          </nav>
+        </>
       )}
 
       {/* ── LEGAL PAGE MODAL ── */}
