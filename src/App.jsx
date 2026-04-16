@@ -860,7 +860,6 @@ export default function App() {
             { id: "odds", label: "Odds", icon: "📊" },
             { id: "scores", label: "Scores", icon: "🏆" },
             { id: "alerts", label: "Alerts", icon: "🔔" },
-            { id: "guides", label: "Guides", icon: "📚" },
           ].map(tab => (
             <button
               key={tab.id}
@@ -886,7 +885,7 @@ export default function App() {
       )}
 
       {/* Sport Filter */}
-      {activeTab !== "guides" && <div style={{
+      {!["guides"].includes(activeTab) && <div style={{
         display: "flex",
         gap: 6,
         padding: "14px 20px",
@@ -899,6 +898,49 @@ export default function App() {
           </Pill>
         ))}
       </div>}
+
+      {/* Strategy Tools — always visible */}
+      <div style={{
+        padding: "0 20px",
+        marginBottom: 6,
+      }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
+          gap: 8,
+        }}>
+          {[
+            { to: "/reverse-line-movement", title: "Reverse Line Movement", sub: "Sharp money vs. public", color: "#7c3aed", icon: "🔄" },
+            { to: "/correlated-parlays", title: "Correlated Parlays", sub: "Legs that move together", color: "#0d9f4f", icon: "🔗" },
+            { to: "/stale-line-detector", title: "Stale Line Detector", sub: "Bet the slow book", color: "#dc2626", icon: "⏱️" },
+            { to: "/narrative-regression", title: "Narrative Regression", sub: "Fade the overreaction", color: "#d97706", icon: "📉" },
+          ].map(tool => (
+            <Link
+              key={tool.to}
+              to={tool.to}
+              style={{
+                background: "#fff",
+                border: "1px solid #e2e5ea",
+                borderRadius: 12,
+                padding: isMobile ? "12px 10px" : "14px 16px",
+                textDecoration: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                borderLeft: `3px solid ${tool.color}`,
+                transition: "box-shadow 0.2s",
+              }}
+            >
+              <span style={{ fontSize: isMobile ? 20 : 24, lineHeight: 1, flexShrink: 0 }}>{tool.icon}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: "#1a1d23", lineHeight: 1.3 }}>{tool.title}</div>
+                <div style={{ fontSize: isMobile ? 9 : 11, color: "#8b919a", marginTop: 2 }}>{tool.sub}</div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
 
       {/* Content */}
       <div style={{ padding: isMobile ? "0 20px 90px" : "0 20px 40px" }}>
