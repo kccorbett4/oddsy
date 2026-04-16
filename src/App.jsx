@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈", season: true },
@@ -858,6 +859,7 @@ export default function App() {
             { id: "odds", label: "Odds", icon: "📊" },
             { id: "alerts", label: "Alerts", icon: "🔔" },
             { id: "scores", label: "Scores", icon: "🏆" },
+            { id: "guides", label: "Guides", icon: "📚" },
           ].map(tab => (
             <button
               key={tab.id}
@@ -883,7 +885,7 @@ export default function App() {
       )}
 
       {/* Sport Filter */}
-      <div style={{
+      {activeTab !== "guides" && <div style={{
         display: "flex",
         gap: 6,
         padding: "14px 20px",
@@ -895,7 +897,7 @@ export default function App() {
             {s.icon} {s.name}
           </Pill>
         ))}
-      </div>
+      </div>}
 
       {/* Content */}
       <div style={{ padding: isMobile ? "0 20px 90px" : "0 20px 40px" }}>
@@ -1740,6 +1742,56 @@ export default function App() {
             </div>
           </>
         )}
+
+        {/* ── GUIDES TAB ── */}
+        {activeTab === "guides" && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Strategy Guides</div>
+              <div style={{ fontSize: 12, color: "#8b919a" }}>In-depth breakdowns of betting strategies, tools, and concepts</div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { to: "/ev-betting", title: "Expected Value (EV) Betting", desc: "The math behind +EV betting and how to find edges the books miss", icon: "📐" },
+                { to: "/sharp-betting", title: "Sharp Betting Signals", desc: "How professional bettors move lines and how to follow the smart money", icon: "🧠" },
+                { to: "/odds-comparison", title: "Odds Comparison", desc: "Why line shopping across sportsbooks is the easiest edge in betting", icon: "📊" },
+                { to: "/parlay-calculator", title: "Parlay Strategy", desc: "When parlays make sense, when they don't, and how to build smarter ones", icon: "🎰" },
+                { to: "/reverse-line-movement", title: "Reverse Line Movement", desc: "When the line moves opposite to where the public is betting — and what it means", icon: "🔄" },
+                { to: "/correlated-parlays", title: "Correlated Parlays", desc: "Find legs that move together to build parlays with a real mathematical edge", icon: "🔗" },
+                { to: "/stale-line-detector", title: "Stale Line Detector", desc: "Spot sportsbooks that haven't caught up to the market — bet before they correct", icon: "⏱️" },
+                { to: "/narrative-regression", title: "Narrative Regression", desc: "When the market overreacts to a blowout or viral moment, bet the correction", icon: "📉" },
+                { to: "/betting-alerts", title: "Betting Alerts", desc: "Get notified when value appears — never miss a +EV opportunity again", icon: "🔔" },
+                { to: "/live-scores", title: "Live Scores for Bettors", desc: "Real-time scores built for bettors, not casual fans — with context that matters", icon: "🏆" },
+              ].map((guide, i) => (
+                <Link
+                  key={guide.to}
+                  to={guide.to}
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #e2e5ea",
+                    borderRadius: 12,
+                    padding: "16px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    textDecoration: "none",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
+                    transition: "border-color 0.2s",
+                  }}
+                >
+                  <span style={{ fontSize: 28, lineHeight: 1, flexShrink: 0 }}>{guide.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23", marginBottom: 3 }}>{guide.title}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>{guide.desc}</div>
+                  </div>
+                  <span style={{ marginLeft: "auto", fontSize: 16, color: "#c4c9d0", flexShrink: 0 }}>›</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {showAlertBuilder && <AlertBuilder onClose={() => setShowAlertBuilder(false)} />}
@@ -1766,6 +1818,7 @@ export default function App() {
             { id: "odds", label: "Odds", icon: "📊" },
             { id: "alerts", label: "Alerts", icon: "🔔" },
             { id: "scores", label: "Scores", icon: "🏆" },
+            { id: "guides", label: "Guides", icon: "📚" },
           ].map(tab => {
             const isActive = activeTab === tab.id;
             return (
@@ -2048,6 +2101,27 @@ export default function App() {
           lineHeight: 1.7,
         }}>
           <strong style={{ color: "#8b919a" }}>DISCLAIMER:</strong> MyOddsy is for informational and entertainment purposes only. We are not a sportsbook and do not accept bets. All odds data is sourced from third parties and may be delayed or inaccurate — always verify with your sportsbook. Nothing on this site constitutes professional gambling advice or guarantees any outcome. Gambling involves substantial risk of financial loss. Past statistical performance does not guarantee future results. Must be 21+ to gamble. Sports betting may not be legal in your jurisdiction — you are responsible for knowing and complying with your local laws. Some links may be affiliate links; see Affiliate Disclosure for details. If you or someone you know has a gambling problem, call <strong style={{ color: "#fca5a5" }}>1-800-522-4700</strong>.
+        </div>
+
+        {/* Strategy Guide links */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#a0aec0", textAlign: "center", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>Strategy Guides</div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+            {[
+              { to: "/ev-betting", label: "EV Betting" },
+              { to: "/sharp-betting", label: "Sharp Betting" },
+              { to: "/odds-comparison", label: "Odds Comparison" },
+              { to: "/parlay-calculator", label: "Parlay Strategy" },
+              { to: "/reverse-line-movement", label: "Reverse Line Movement" },
+              { to: "/correlated-parlays", label: "Correlated Parlays" },
+              { to: "/stale-line-detector", label: "Stale Line Detector" },
+              { to: "/narrative-regression", label: "Narrative Regression" },
+              { to: "/betting-alerts", label: "Betting Alerts" },
+              { to: "/live-scores", label: "Live Scores" },
+            ].map(link => (
+              <Link key={link.to} to={link.to} style={{ color: "#8b919a", fontSize: 11, textDecoration: "underline" }}>{link.label}</Link>
+            ))}
+          </div>
         </div>
 
         {/* Legal links */}
