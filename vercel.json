@@ -1,4 +1,7 @@
 {
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "framework": null,
   "rewrites": [
     { "source": "/ev-betting", "destination": "/index.html" },
     { "source": "/odds-comparison", "destination": "/index.html" },
