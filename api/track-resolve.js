@@ -1,17 +1,20 @@
 // Cron job: checks finished games and resolves pending picks.
-// Runs every 2 hours via Vercel Cron.
+// Runs daily at 6 AM UTC via Vercel Cron.
+import { createClient } from "redis";
+
 export default async function handler(req, res) {
+  let client;
   try {
-    let kv;
-    try {
-      const mod = await import("@vercel/kv");
-      kv = mod.kv;
-    } catch {
-      return res.status(200).json({ resolved: 0, note: "KV not available" });
+    if (!process.env.REDIS_URL) {
+      return res.status(200).json({ resolved: 0, note: "REDIS_URL not configured" });
     }
-    // Get all pending picks where the game should have started by now
+
+    client = createClient({ url: process.env.REDIS_URL });
+    await client.connect();
+
     const now = Date.now();
-    const pendingIds = await kv.zrange("pending_picks", 0, now, { byScore: true });
+    // Get all pending picks where the game should have started by now
+    const pendingIds = await client.zRangeByScore("pending_picks", 0, now);
 
     if (!pendingIds || pendingIds.length === 0) {
       return res.status(200).json({ resolved: 0, message: "No pending picks to resolve" });
@@ -28,11 +31,10 @@ export default async function handler(req, res) {
       soccer_usa_mls: "soccer/usa.1",
     };
 
-    // Fetch scores for all sports
+    // Fetch scores for today and yesterday
     const allScores = [];
     for (const [key, espnPath] of Object.entries(sportMap)) {
       try {
-        // Fetch today and yesterday to catch games that finished overnight
         for (const dateOffset of [0, -1]) {
           const d = new Date(now + dateOffset * 86400000);
           const dateStr = d.toISOString().slice(0, 10).replace(/-/g, "");
@@ -64,9 +66,9 @@ export default async function handler(req, res) {
     let pushes = 0;
 
     for (const pickId of pendingIds) {
-      const pick = await kv.hgetall(`pick:${pickId}`);
-      if (!pick || pick.resolved === "true") {
-        await kv.zrem("pending_picks", pickId);
+      const pick = await client.hGetAll(`pick:${pickId}`);
+      if (!pick || Object.keys(pick).length === 0 || pick.resolved === "true") {
+        await client.zRem("pending_picks", pickId);
         continue;
       }
 
@@ -80,12 +82,11 @@ export default async function handler(req, res) {
       });
 
       if (!matchedScore) {
-        // Game hasn't finished yet — skip but keep pending
-        // Remove if the game is more than 48 hours old (probably missed it)
+        // Remove if the game is more than 48 hours old
         const gameTime = new Date(pick.commenceTime).getTime();
         if (now - gameTime > 48 * 3600000) {
-          await kv.zrem("pending_picks", pickId);
-          await kv.hset(`pick:${pickId}`, { resolved: "true", result: "expired" });
+          await client.zRem("pending_picks", pickId);
+          await client.hSet(`pick:${pickId}`, { resolved: "true", result: "expired" });
         }
         continue;
       }
@@ -98,7 +99,6 @@ export default async function handler(req, res) {
       const point = pick.point !== "" ? parseFloat(pick.point) : null;
 
       if (pick.marketType === "h2h") {
-        // Moneyline: did the picked team win?
         const pickedHome = pick.outcome.toLowerCase().includes(pick.homeTeam?.toLowerCase()) ||
                           pick.homeTeam?.toLowerCase().includes(pick.outcome?.toLowerCase());
         if (pickedHome) {
@@ -107,7 +107,6 @@ export default async function handler(req, res) {
           result = awayScore > homeScore ? "win" : homeScore === awayScore ? "push" : "loss";
         }
       } else if (pick.marketType === "spreads" && point !== null) {
-        // Spread: picked team's score + spread vs opponent
         const pickedHome = pick.outcome.toLowerCase().includes(pick.homeTeam?.toLowerCase()) ||
                           pick.homeTeam?.toLowerCase().includes(pick.outcome?.toLowerCase());
         let adjustedScore;
@@ -119,7 +118,6 @@ export default async function handler(req, res) {
           result = adjustedScore > homeScore ? "win" : adjustedScore === homeScore ? "push" : "loss";
         }
       } else if (pick.marketType === "totals" && point !== null) {
-        // Totals: over/under
         const isOver = pick.outcome.toLowerCase().includes("over");
         if (totalScore > point) {
           result = isOver ? "win" : "loss";
@@ -131,29 +129,26 @@ export default async function handler(req, res) {
       }
 
       if (result) {
-        // Update the pick record
-        await kv.hset(`pick:${pickId}`, {
+        await client.hSet(`pick:${pickId}`, {
           resolved: "true",
           result,
-          finalHome: homeScore,
-          finalAway: awayScore,
+          finalHome: String(homeScore),
+          finalAway: String(awayScore),
           resolvedAt: new Date().toISOString(),
         });
 
         // Update strategy stats
         const statsKey = `stats:${pick.strategy}`;
-        await kv.hincrby(statsKey, "total", 1);
-        await kv.hincrby(statsKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
+        await client.hIncrBy(statsKey, "total", 1);
+        await client.hIncrBy(statsKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
 
-        // Also update daily stats
+        // Update daily stats
         const dailyKey = `stats:${pick.strategy}:${pick.date}`;
-        await kv.hincrby(dailyKey, "total", 1);
-        await kv.hincrby(dailyKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
-        // Expire daily stats after 90 days
-        await kv.expire(dailyKey, 90 * 86400);
+        await client.hIncrBy(dailyKey, "total", 1);
+        await client.hIncrBy(dailyKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
+        await client.expire(dailyKey, 90 * 86400);
 
-        // Remove from pending
-        await kv.zrem("pending_picks", pickId);
+        await client.zRem("pending_picks", pickId);
 
         resolved++;
         if (result === "win") wins++;
@@ -161,9 +156,6 @@ export default async function handler(req, res) {
         else pushes++;
       }
     }
-
-    // Expire individual pick records after 90 days to keep storage lean
-    // (stats:* aggregates are kept permanently)
 
     return res.status(200).json({
       resolved,
@@ -176,5 +168,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Resolve error:", err);
     return res.status(500).json({ error: err.message });
+  } finally {
+    if (client) await client.disconnect().catch(() => {});
   }
 }

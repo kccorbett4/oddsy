@@ -1,24 +1,26 @@
 // Returns performance stats for all strategies
+import { createClient } from "redis";
+
 export default async function handler(req, res) {
+  let client;
   try {
-    let kv;
-    try {
-      const mod = await import("@vercel/kv");
-      kv = mod.kv;
-    } catch {
+    if (!process.env.REDIS_URL) {
       return res.status(200).json({
         stats: {},
         pendingPicks: 0,
-        note: "KV module not available",
+        note: "REDIS_URL not configured",
       });
     }
+
+    client = createClient({ url: process.env.REDIS_URL });
+    await client.connect();
 
     const strategies = ["sharp", "value", "stale", "rlm", "correlated", "narrative"];
     const stats = {};
 
     for (const strategy of strategies) {
-      const data = await kv.hgetall(`stats:${strategy}`);
-      if (data) {
+      const data = await client.hGetAll(`stats:${strategy}`);
+      if (data && Object.keys(data).length > 0) {
         const wins = parseInt(data.wins || 0);
         const losses = parseInt(data.losses || 0);
         const pushes = parseInt(data.pushes || 0);
@@ -36,7 +38,7 @@ export default async function handler(req, res) {
       }
     }
 
-    const pendingCount = await kv.zcard("pending_picks");
+    const pendingCount = await client.zCard("pending_picks");
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=60");
     return res.status(200).json({ stats, pendingPicks: pendingCount });
@@ -46,5 +48,7 @@ export default async function handler(req, res) {
       pendingPicks: 0,
       error: err.message,
     });
+  } finally {
+    if (client) await client.disconnect().catch(() => {});
   }
 }

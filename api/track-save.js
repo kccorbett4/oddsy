@@ -1,17 +1,19 @@
 // Frontend POSTs current picks from each strategy.
+import { createClient } from "redis";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST only" });
   }
 
+  let client;
   try {
-    let kv;
-    try {
-      const mod = await import("@vercel/kv");
-      kv = mod.kv;
-    } catch {
-      return res.status(200).json({ saved: 0, note: "KV not available" });
+    if (!process.env.REDIS_URL) {
+      return res.status(200).json({ saved: 0, note: "REDIS_URL not configured" });
     }
+
+    client = createClient({ url: process.env.REDIS_URL });
+    await client.connect();
 
     const { picks } = req.body;
     if (!picks || !Array.isArray(picks) || picks.length === 0) {
@@ -34,7 +36,6 @@ export default async function handler(req, res) {
         point,        // spread/total number (null for h2h)
         odds,
         book,
-        // For correlated parlays, include leg2
         leg2Outcome,
         leg2Point,
         leg2MarketType,
@@ -45,20 +46,20 @@ export default async function handler(req, res) {
       const pickId = `${strategy}:${gameId}:${outcome}:${point || ""}:${marketType}`;
 
       // Don't save duplicate picks for the same game/outcome
-      const exists = await kv.hget(`pick:${pickId}`, "strategy");
+      const exists = await client.hGet(`pick:${pickId}`, "strategy");
       if (exists) continue;
 
-      await kv.hset(`pick:${pickId}`, {
+      await client.hSet(`pick:${pickId}`, {
         strategy,
         gameId,
-        homeTeam,
-        awayTeam,
-        sportKey,
-        commenceTime,
-        marketType,
+        homeTeam: homeTeam || "",
+        awayTeam: awayTeam || "",
+        sportKey: sportKey || "",
+        commenceTime: commenceTime || "",
+        marketType: marketType || "",
         outcome,
         point: point ?? "",
-        odds,
+        odds: String(odds || ""),
         book: book || "",
         leg2Outcome: leg2Outcome || "",
         leg2Point: leg2Point ?? "",
@@ -66,13 +67,13 @@ export default async function handler(req, res) {
         savedAt: new Date().toISOString(),
         date: today,
         resolved: "false",
-        result: "", // "win" | "loss" | "push" | ""
+        result: "",
       });
 
       // Add to pending set (scored by commence time for easy retrieval)
-      await kv.zadd("pending_picks", {
+      await client.zAdd("pending_picks", {
         score: new Date(commenceTime).getTime(),
-        member: pickId,
+        value: pickId,
       });
 
       saved++;
@@ -82,5 +83,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Save error:", err);
     return res.status(500).json({ error: err.message });
+  } finally {
+    if (client) await client.disconnect().catch(() => {});
   }
 }
