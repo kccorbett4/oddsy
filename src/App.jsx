@@ -1192,7 +1192,7 @@ export default function App() {
 
   // Fetch strategy performance stats
   useEffect(() => {
-    fetch("/api/track/stats")
+    fetch("/api/track-stats")
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.stats) setStrategyStats(data.stats); })
       .catch(() => {});
@@ -1281,7 +1281,7 @@ export default function App() {
     }));
 
     if (picks.length > 0) {
-      fetch("/api/track/save", {
+      fetch("/api/track-save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ picks }),
