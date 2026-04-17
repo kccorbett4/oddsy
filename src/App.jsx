@@ -739,6 +739,47 @@ const StatCard = ({ label, value, sub, color }) => (
   </div>
 );
 
+const PerformanceBanner = ({ stats, label }) => {
+  if (!stats || stats.total === 0 || stats.winPct === null) return null;
+  const pct = parseFloat(stats.winPct);
+  const color = pct >= 55 ? "#0d9f4f" : pct >= 50 ? "#1a73e8" : "#e8a100";
+  return (
+    <div style={{
+      background: `${color}08`,
+      border: `1px solid ${color}30`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      marginBottom: 14,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      flexWrap: "wrap",
+      gap: 8,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{
+          fontSize: 20, fontWeight: 900, color,
+          fontFamily: "'Space Mono', monospace",
+        }}>{stats.winPct}%</div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>{label} Win Rate</div>
+          <div style={{ fontSize: 10, color: "#8b919a" }}>
+            {stats.wins}W - {stats.losses}L{stats.pushes > 0 ? ` - ${stats.pushes}P` : ""} ({stats.total} tracked)
+          </div>
+        </div>
+      </div>
+      <div style={{
+        width: 100, height: 6, borderRadius: 3, background: "#e2e5ea", overflow: "hidden",
+      }}>
+        <div style={{
+          width: `${pct}%`, height: "100%", borderRadius: 3, background: color,
+          transition: "width 0.5s",
+        }} />
+      </div>
+    </div>
+  );
+};
+
 const ValueBetCard = ({ bet, index }) => {
   const evColor = parseFloat(bet.ev) > 5 ? "#0d9f4f" : parseFloat(bet.ev) > 3 ? "#1a73e8" : "#e8a100";
   const marketLabel = bet.marketType === "h2h" ? "Moneyline" : bet.marketType === "spreads" ? "Spread" : "Total";
@@ -1015,6 +1056,8 @@ export default function App() {
   const [narrativePlays, setNarrativePlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [strategyStats, setStrategyStats] = useState({});
+  const picksSentRef = useRef(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
   const [geoLoaded, setGeoLoaded] = useState(false);
 
@@ -1146,6 +1189,105 @@ export default function App() {
   useEffect(() => {
     if (valueBets.length > 0) setParlays(generateParlays(valueBets));
   }, [parlayKey]);
+
+  // Fetch strategy performance stats
+  useEffect(() => {
+    fetch("/api/track/stats")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.stats) setStrategyStats(data.stats); })
+      .catch(() => {});
+  }, []);
+
+  // POST picks to tracking API when data is ready (once per session)
+  useEffect(() => {
+    if (picksSentRef.current) return;
+    if (sharpPlays.length === 0 && valueBets.length === 0 && staleLines.length === 0) return;
+    picksSentRef.current = true;
+
+    const picks = [];
+    const mapPick = (strategy, item) => ({
+      strategy,
+      gameId: item.game.id,
+      homeTeam: item.game.home_team,
+      awayTeam: item.game.away_team,
+      sportKey: item.game.sport_key,
+      commenceTime: item.game.commence_time || item.commence,
+      marketType: item.marketType,
+      outcome: item.outcome,
+      point: item.point ?? null,
+      odds: item.odds,
+      book: item.book || "",
+    });
+
+    // Top 10 sharp plays
+    sharpPlays.slice(0, 10).forEach(p => picks.push(mapPick("sharp", p)));
+    // Top 10 value bets
+    valueBets.slice(0, 10).forEach(p => picks.push(mapPick("value", p)));
+    // All stale lines
+    staleLines.forEach(s => picks.push({
+      strategy: "stale",
+      gameId: s.game.id,
+      homeTeam: s.game.home_team,
+      awayTeam: s.game.away_team,
+      sportKey: s.game.sport_key,
+      commenceTime: s.game.commence_time || s.commence,
+      marketType: s.marketType,
+      outcome: s.outcome,
+      point: s.point ?? null,
+      odds: s.staleOdds,
+      book: s.staleBook,
+    }));
+    // All RLM plays
+    rlmPlays.forEach(p => picks.push({
+      strategy: "rlm",
+      gameId: p.game.id,
+      homeTeam: p.game.home_team,
+      awayTeam: p.game.away_team,
+      sportKey: p.game.sport_key,
+      commenceTime: p.game.commence_time || p.commence,
+      marketType: p.marketType,
+      outcome: p.outcome,
+      point: p.point ?? null,
+      odds: p.bestOdds,
+      book: p.bestBook,
+    }));
+    // Correlated parlays (track leg1 only for simplicity)
+    correlatedParlays.slice(0, 15).forEach(c => picks.push({
+      strategy: "correlated",
+      gameId: c.game.id,
+      homeTeam: c.game.home_team,
+      awayTeam: c.game.away_team,
+      sportKey: c.game.sport_key,
+      commenceTime: c.game.commence_time || c.commence,
+      marketType: "h2h",
+      outcome: c.leg1.name,
+      point: null,
+      odds: c.leg1.price,
+      book: c.leg1.book,
+    }));
+    // Narrative plays
+    narrativePlays.forEach(p => picks.push({
+      strategy: "narrative",
+      gameId: p.game.id,
+      homeTeam: p.game.home_team,
+      awayTeam: p.game.away_team,
+      sportKey: p.game.sport_key,
+      commenceTime: p.game.commence_time || p.commence,
+      marketType: "spreads",
+      outcome: p.blowoutTeam,
+      point: p.bestSpread,
+      odds: p.bestOdds,
+      book: p.bestBook,
+    }));
+
+    if (picks.length > 0) {
+      fetch("/api/track/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ picks }),
+      }).catch(() => {});
+    }
+  }, [sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
 
   const filteredGames = games.filter(g => {
     const sportMatch = activeSport === "all" || g.sport_key === activeSport;
@@ -1440,6 +1582,7 @@ export default function App() {
         {/* ── SHARP PLAYS TAB ── */}
         {activeTab === "sharp" && (
           <>
+            <PerformanceBanner stats={strategyStats.sharp} label="Sharp Plays" />
             {/* Research explainer */}
             <div style={{
               background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
@@ -1695,6 +1838,7 @@ export default function App() {
         {/* ── VALUE BETS TAB ── */}
         {activeTab === "value" && (
           <>
+            <PerformanceBanner stats={strategyStats.value} label="Value Bets" />
             {/* How it works explainer */}
             <div style={{
               background: "#e8f0fe",
@@ -2164,6 +2308,7 @@ export default function App() {
         {/* ── STALE LINE DETECTOR TAB ── */}
         {activeTab === "stale" && (
           <>
+            <PerformanceBanner stats={strategyStats.stale} label="Stale Lines" />
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Stale Line Detector</div>
               <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Lines where one book hasn't caught up to the market consensus. These are genuine +EV opportunities — bet before they correct.</div>
@@ -2244,6 +2389,7 @@ export default function App() {
         {/* ── REVERSE LINE MOVEMENT TAB ── */}
         {activeTab === "rlm" && (
           <>
+            <PerformanceBanner stats={strategyStats.rlm} label="RLM Plays" />
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Reverse Line Movement</div>
               <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Games where sharp money has moved some books but the public side still offers better odds elsewhere. Bet with the sharp books, at the public price.</div>
@@ -2326,6 +2472,7 @@ export default function App() {
         {/* ── CORRELATED PARLAYS TAB ── */}
         {activeTab === "correlated" && (
           <>
+            <PerformanceBanner stats={strategyStats.correlated} label="Correlated Parlays" />
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Correlated Parlays</div>
               <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Same-game parlay legs that are logically correlated — when one hits, the other is more likely to hit too. Sportsbooks underprice these correlations.</div>
@@ -2410,6 +2557,7 @@ export default function App() {
         {/* ── NARRATIVE REGRESSION TAB ── */}
         {activeTab === "narrative" && (
           <>
+            <PerformanceBanner stats={strategyStats.narrative} label="Narrative Plays" />
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Narrative Regression</div>
               <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Teams that just got blown out are undervalued by the public. When the underlying quality hasn't changed, bet the correction.</div>

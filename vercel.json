@@ -2,5 +2,11 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/api/track/resolve",
+      "schedule": "0 */2 * * *"
+    }
   ]
 }
