@@ -1,9 +1,14 @@
-import { kv } from "@vercel/kv";
-
 // Cron job: checks finished games and resolves pending picks.
 // Runs every 2 hours via Vercel Cron.
 export default async function handler(req, res) {
   try {
+    let kv;
+    try {
+      const mod = await import("@vercel/kv");
+      kv = mod.kv;
+    } catch {
+      return res.status(200).json({ resolved: 0, note: "KV not available" });
+    }
     // Get all pending picks where the game should have started by now
     const now = Date.now();
     const pendingIds = await kv.zrange("pending_picks", 0, now, { byScore: true });

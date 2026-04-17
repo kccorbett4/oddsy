@@ -1,14 +1,19 @@
-import { kv } from "@vercel/kv";
-
 // Frontend POSTs current picks from each strategy.
-// Each pick is saved with enough info to resolve later.
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST only" });
   }
 
   try {
-    const { picks } = req.body; // array of pick objects
+    let kv;
+    try {
+      const mod = await import("@vercel/kv");
+      kv = mod.kv;
+    } catch {
+      return res.status(200).json({ saved: 0, note: "KV not available" });
+    }
+
+    const { picks } = req.body;
     if (!picks || !Array.isArray(picks) || picks.length === 0) {
       return res.status(400).json({ error: "No picks provided" });
     }
