@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/ev-betting", "destination": "/index.html" },
     { "source": "/odds-comparison", "destination": "/index.html" },
     { "source": "/parlay-calculator", "destination": "/index.html" },
