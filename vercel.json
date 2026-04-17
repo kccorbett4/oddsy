@@ -1,6 +1,15 @@
 {
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/ev-betting", "destination": "/index.html" },
+    { "source": "/odds-comparison", "destination": "/index.html" },
+    { "source": "/parlay-calculator", "destination": "/index.html" },
+    { "source": "/sharp-betting", "destination": "/index.html" },
+    { "source": "/betting-alerts", "destination": "/index.html" },
+    { "source": "/live-scores", "destination": "/index.html" },
+    { "source": "/reverse-line-movement", "destination": "/index.html" },
+    { "source": "/correlated-parlays", "destination": "/index.html" },
+    { "source": "/stale-line-detector", "destination": "/index.html" },
+    { "source": "/narrative-regression", "destination": "/index.html" }
   ],
   "crons": [
     {
