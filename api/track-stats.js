@@ -25,16 +25,19 @@ export default async function handler(req, res) {
         const losses = parseInt(data.losses || 0);
         const pushes = parseInt(data.pushes || 0);
         const total = parseInt(data.total || 0);
+        const units = parseFloat(data.units || 0);
         const decided = wins + losses;
         stats[strategy] = {
           wins,
           losses,
           pushes,
           total,
+          units: Number(units.toFixed(2)),
+          roi: total > 0 ? Number(((units / total) * 100).toFixed(2)) : null,
           winPct: decided > 0 ? ((wins / decided) * 100).toFixed(1) : null,
         };
       } else {
-        stats[strategy] = { wins: 0, losses: 0, pushes: 0, total: 0, winPct: null };
+        stats[strategy] = { wins: 0, losses: 0, pushes: 0, total: 0, units: 0, roi: null, winPct: null };
       }
     }
 

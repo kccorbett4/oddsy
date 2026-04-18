@@ -597,30 +597,38 @@ const findNarrativePlays = (games, liveScores) => {
   const plays = [];
   if (!liveScores || liveScores.length === 0) return plays;
 
+  // Blowout thresholds by sport_key — absolute point/run/goal margin
+  const BLOWOUT_THRESHOLD = {
+    basketball_nba: 20,
+    basketball_ncaab: 25,
+    americanfootball_nfl: 21,
+    americanfootball_ncaaf: 24,
+    baseball_mlb: 7,
+    icehockey_nhl: 4,
+  };
+
   // Find teams with blowout results (finished games)
   const blowoutTeams = new Set();
   const blowoutDetails = {};
   liveScores.forEach(event => {
     if (event.status.type !== "STATUS_FINAL") return;
+    const threshold = BLOWOUT_THRESHOLD[event.sport_key];
+    if (!threshold) return; // unknown sport — skip
     const diff = Math.abs(event.home.score - event.away.score);
+    if (diff < threshold) return;
+
     const loser = event.home.score < event.away.score ? event.home.name : event.away.name;
     const winner = event.home.score > event.away.score ? event.home.name : event.away.name;
+    if (!loser) return;
 
-    // Blowout thresholds by sport
-    let isBlowout = false;
-    if (diff >= 20) isBlowout = true; // NBA/NCAAB
-    if (diff >= 17) isBlowout = true; // NFL
-    if (diff >= 6) isBlowout = true;  // MLB/NHL
-
-    if (isBlowout) {
-      blowoutTeams.add(loser.toLowerCase());
-      blowoutDetails[loser.toLowerCase()] = {
-        opponent: winner,
-        score: `${event.away.score}-${event.home.score}`,
-        margin: diff,
-        team: loser,
-      };
-    }
+    blowoutTeams.add(loser.toLowerCase());
+    blowoutDetails[loser.toLowerCase()] = {
+      opponent: winner,
+      score: `${event.away.score}-${event.home.score}`,
+      margin: diff,
+      team: loser,
+      sport_key: event.sport_key,
+    };
   });
 
   if (blowoutTeams.size === 0) return plays;
@@ -739,10 +747,48 @@ const StatCard = ({ label, value, sub, color }) => (
   </div>
 );
 
+const SAMPLE_THRESHOLD = 20;
+
 const PerformanceBanner = ({ stats, label }) => {
-  if (!stats || stats.total === 0 || stats.winPct === null) return null;
-  const pct = parseFloat(stats.winPct);
-  const color = pct >= 55 ? "#0d9f4f" : pct >= 50 ? "#1a73e8" : "#e8a100";
+  if (!stats || stats.total === 0) return null;
+  const decided = (stats.wins || 0) + (stats.losses || 0);
+
+  if (decided < SAMPLE_THRESHOLD) {
+    return (
+      <div style={{
+        background: "#f8f9fa",
+        border: "1px solid #e2e5ea",
+        borderRadius: 10,
+        padding: "10px 14px",
+        marginBottom: 14,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 800, color: "#6b7280",
+            fontFamily: "'DM Sans', sans-serif",
+          }}>📊</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>{label} — Building Sample</div>
+            <div style={{ fontSize: 10, color: "#8b919a" }}>
+              {stats.wins}W - {stats.losses}L{stats.pushes > 0 ? ` - ${stats.pushes}P` : ""} · Need {SAMPLE_THRESHOLD - decided} more settled picks for confident ROI
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const units = typeof stats.units === "number" ? stats.units : parseFloat(stats.units || 0);
+  const roi = stats.roi;
+  const roiNum = roi === null || roi === undefined ? null : parseFloat(roi);
+  const color = roiNum === null ? "#8b919a"
+    : roiNum >= 5 ? "#0d9f4f" : roiNum >= 0 ? "#1a73e8" : "#e8a100";
+  const unitsStr = (units >= 0 ? "+" : "") + units.toFixed(2) + "u";
+  const roiStr = roiNum === null ? "—" : `${roiNum >= 0 ? "+" : ""}${roiNum.toFixed(1)}%`;
   return (
     <div style={{
       background: `${color}08`,
@@ -760,21 +806,13 @@ const PerformanceBanner = ({ stats, label }) => {
         <div style={{
           fontSize: 20, fontWeight: 900, color,
           fontFamily: "'Space Mono', monospace",
-        }}>{stats.winPct}%</div>
+        }}>{unitsStr}</div>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>{label} Win Rate</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>{label} · {roiStr} ROI</div>
           <div style={{ fontSize: 10, color: "#8b919a" }}>
-            {stats.wins}W - {stats.losses}L{stats.pushes > 0 ? ` - ${stats.pushes}P` : ""} ({stats.total} tracked)
+            {stats.wins}W - {stats.losses}L{stats.pushes > 0 ? ` - ${stats.pushes}P` : ""} ({stats.winPct || "—"}% win) · {stats.total} tracked
           </div>
         </div>
-      </div>
-      <div style={{
-        width: 100, height: 6, borderRadius: 3, background: "#e2e5ea", overflow: "hidden",
-      }}>
-        <div style={{
-          width: `${pct}%`, height: "100%", borderRadius: 3, background: color,
-          transition: "width 0.5s",
-        }} />
       </div>
     </div>
   );
@@ -1037,7 +1075,10 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
-  const [activeTab, setActiveTab] = useState("sharp");
+  const [activeTab, setActiveTab] = useState("home");
+  const [pickFilter, setPickFilter] = useState("all"); // all|sharp|value|stale|rlm|narrative
+  const [parlaySub, setParlaySub] = useState("safe"); // safe|correlated
+  const [gamesSub, setGamesSub] = useState("odds"); // odds|scores
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1055,7 +1096,6 @@ export default function App() {
   const [correlatedParlays, setCorrelatedParlays] = useState([]);
   const [narrativePlays, setNarrativePlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [strategyStats, setStrategyStats] = useState({});
   const picksSentRef = useRef(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
@@ -1332,9 +1372,20 @@ export default function App() {
         animation: "fadeSlideIn 0.5s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <div>
+          <button
+            onClick={() => setActiveTab("home")}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+          >
             <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 80, display: "block", maxWidth: "75vw" }} />
-          </div>
+          </button>
+          <button
+            onClick={() => setShowAlertBuilder(true)}
+            aria-label="Create alert"
+            style={{
+              background: "#f0f1f3", border: "1px solid #e2e5ea", borderRadius: 10,
+              padding: "8px 10px", cursor: "pointer", fontSize: 18, lineHeight: 1,
+            }}
+          >🔔</button>
         </div>
       </header>
 
@@ -1348,12 +1399,11 @@ export default function App() {
           borderBottom: "1px solid #e2e5ea",
         }}>
           {[
-            { id: "sharp", label: "Sharp Plays", icon: "🧠" },
-            { id: "value", label: "Value Bets", icon: "⚡" },
+            { id: "home", label: "Home", icon: "🏠" },
+            { id: "picks", label: "Picks", icon: "💰" },
             { id: "parlays", label: "Parlays", icon: "🎰" },
-            { id: "odds", label: "Odds", icon: "📊" },
-            { id: "scores", label: "Scores", icon: "🏆" },
-            { id: "alerts", label: "Alerts", icon: "🔔" },
+            { id: "games", label: "Games", icon: "📊" },
+            { id: "record", label: "Track Record", icon: "📈" },
           ].map(tab => (
             <button
               key={tab.id}
@@ -1365,7 +1415,7 @@ export default function App() {
                 borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
                 background: "none",
                 color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 700,
                 cursor: "pointer",
                 fontFamily: "'DM Sans', sans-serif",
@@ -1378,8 +1428,8 @@ export default function App() {
         </nav>
       )}
 
-      {/* Sport Filter */}
-      {!["guides"].includes(activeTab) && <div style={{
+      {/* Sport Filter — only on tabs that filter by sport */}
+      {["picks", "parlays", "games"].includes(activeTab) && <div style={{
         display: "flex",
         gap: 6,
         padding: "14px 20px",
@@ -1393,57 +1443,11 @@ export default function App() {
         ))}
       </div>}
 
-      {/* Strategy Tools — always visible */}
-      <div style={{
-        padding: "0 20px",
-        marginBottom: 6,
-      }}>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
-          gap: 8,
-        }}>
-          {[
-            { id: "rlm", title: "Reverse Line Movement", sub: `${rlmPlays.length} plays`, color: "#7c3aed", icon: "🔄" },
-            { id: "correlated", title: "Correlated Parlays", sub: `${correlatedParlays.length} combos`, color: "#0d9f4f", icon: "🔗" },
-            { id: "stale", title: "Stale Line Detector", sub: `${staleLines.length} stale`, color: "#dc2626", icon: "⏱️" },
-            { id: "narrative", title: "Narrative Regression", sub: `${narrativePlays.length} plays`, color: "#d97706", icon: "📉" },
-          ].map(tool => (
-            <button
-              key={tool.id}
-              onClick={() => setActiveTab(tool.id)}
-              style={{
-                background: activeTab === tool.id ? `${tool.color}10` : "#fff",
-                border: activeTab === tool.id ? `1px solid ${tool.color}` : "1px solid #e2e5ea",
-                borderRadius: 12,
-                padding: isMobile ? "12px 10px" : "14px 16px",
-                textDecoration: "none",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                boxShadow: activeTab === tool.id ? `0 2px 8px ${tool.color}20` : "0 1px 3px rgba(0,0,0,0.06)",
-                borderLeft: `3px solid ${tool.color}`,
-                transition: "all 0.2s",
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                textAlign: "left",
-              }}
-            >
-              <span style={{ fontSize: isMobile ? 20 : 24, lineHeight: 1, flexShrink: 0 }}>{tool.icon}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: "#1a1d23", lineHeight: 1.3 }}>{tool.title}</div>
-                <div style={{ fontSize: isMobile ? 9 : 11, color: tool.color, marginTop: 2, fontWeight: 600 }}>{tool.sub}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Content */}
       <div style={{ padding: isMobile ? "0 20px 90px" : "0 20px 40px" }}>
 
         {/* Error state when API fails */}
-        {dataSource === "error" && activeTab !== "scores" && (
+        {dataSource === "error" && !(activeTab === "games" && gamesSub === "scores") && activeTab !== "home" && activeTab !== "record" && (
           <div style={{
             background: "#fef2f2",
             border: "1px solid #fecaca",
@@ -1476,8 +1480,426 @@ export default function App() {
           </div>
         )}
 
-        {/* ── LIVE SCORES TAB ── */}
-        {activeTab === "scores" && (
+        {/* ── HOME TAB ── */}
+        {activeTab === "home" && (() => {
+          // Build "today's top 3" by merging strategies and sorting by edge
+          const sharpTop = sharpPlays.slice(0, 3).map(p => ({
+            kind: "sharp", label: "Sharp", color: "#1a73e8",
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            game: `${p.game.away_team} @ ${p.game.home_team}`,
+            odds: p.odds, book: p.book, edge: parseFloat(p.ev || 0),
+          }));
+          const valueTop = valueBets.slice(0, 3).map(p => ({
+            kind: "value", label: "Value", color: "#0d9f4f",
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            game: `${p.game.away_team} @ ${p.game.home_team}`,
+            odds: p.odds, book: p.book, edge: parseFloat(p.ev || 0),
+          }));
+          const staleTop = staleLines.slice(0, 2).map(p => ({
+            kind: "stale", label: "Stale Line", color: "#dc2626",
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            game: `${p.game.away_team} @ ${p.game.home_team}`,
+            odds: p.staleOdds, book: p.staleBook, edge: parseFloat(p.diff || 0),
+          }));
+          const merged = [...sharpTop, ...valueTop, ...staleTop].sort((a, b) => b.edge - a.edge).slice(0, 3);
+          const totalPlays = sharpPlays.length + valueBets.length + staleLines.length + rlmPlays.length + narrativePlays.length;
+          const totalParlays = parlays.length + correlatedParlays.length;
+          const decidedCount = Object.values(strategyStats).reduce((sum, s) => sum + ((s?.wins || 0) + (s?.losses || 0)), 0);
+          const totalSettled = Object.values(strategyStats).reduce((sum, s) => sum + (s?.total || 0), 0);
+          const totalUnits = Object.values(strategyStats).reduce((sum, s) => sum + (typeof s?.units === "number" ? s.units : parseFloat(s?.units || 0)), 0);
+          const overallRoi = totalSettled > 0 ? ((totalUnits / totalSettled) * 100) : null;
+
+          return (
+            <>
+              {/* Hero */}
+              <div style={{
+                background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
+                borderRadius: 18, padding: "24px 20px", marginBottom: 16, color: "#fff",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#68d391", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+                  Oddsy · Smarter Sports Betting
+                </div>
+                <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, lineHeight: 1.2, marginBottom: 8 }}>
+                  Find bets with a real statistical edge.
+                </div>
+                <div style={{ fontSize: 13, color: "#cbd5e0", lineHeight: 1.6, marginBottom: 16 }}>
+                  We compare odds across 6 sportsbooks in real-time and surface only the picks with a positive expected value. Every pick we recommend gets tracked — you see our actual win rates, not just promises.
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button onClick={() => setActiveTab("picks")} style={{
+                    padding: "10px 20px", borderRadius: 10, border: "none",
+                    background: "#1a73e8", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    See Today's Picks →
+                  </button>
+                  <button onClick={() => setActiveTab("record")} style={{
+                    padding: "10px 20px", borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "transparent", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    Track Record
+                  </button>
+                </div>
+              </div>
+
+              {/* Live stats strip */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
+                gap: 10, marginBottom: 16,
+              }}>
+                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Live Picks</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>{totalPlays}</div>
+                  <div style={{ fontSize: 10, color: "#8b919a" }}>across 5 strategies</div>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Parlays</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: "#7c3aed", fontFamily: "'Space Mono', monospace" }}>{totalParlays}</div>
+                  <div style={{ fontSize: 10, color: "#8b919a" }}>built for today</div>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Games On Board</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: "#1a1d23", fontFamily: "'Space Mono', monospace" }}>{games.length}</div>
+                  <div style={{ fontSize: 10, color: "#8b919a" }}>priced across books</div>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tracked ROI</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: overallRoi === null ? "#8b919a" : overallRoi >= 0 ? "#0d9f4f" : "#e8a100", fontFamily: "'Space Mono', monospace" }}>
+                    {overallRoi === null ? "—" : `${overallRoi >= 0 ? "+" : ""}${overallRoi.toFixed(1)}%`}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#8b919a" }}>{totalUnits >= 0 ? "+" : ""}{totalUnits.toFixed(1)}u · {decidedCount} settled</div>
+                </div>
+              </div>
+
+              {/* Today's top picks */}
+              <div style={{ marginBottom: 22 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>Today's Top Picks</h2>
+                  <button onClick={() => setActiveTab("picks")} style={{
+                    background: "none", border: "none", color: "#1a73e8", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                  }}>See all →</button>
+                </div>
+                {merged.length === 0 ? (
+                  <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "24px 16px", textAlign: "center", color: "#8b919a", fontSize: 13 }}>
+                    Loading today's picks…
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {merged.map((m, i) => (
+                      <button key={i} onClick={() => setActiveTab("picks")} style={{
+                        background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${m.color}`,
+                        borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left",
+                        display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
+                      }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
+                              color: m.color, background: `${m.color}12`, padding: "2px 6px", borderRadius: 4,
+                            }}>{m.label}</span>
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {m.title}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#8b919a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {m.game}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: m.odds > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace" }}>
+                            {formatOdds(m.odds)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#8b919a" }}>{m.book}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Explore cards */}
+              <h2 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>How Oddsy Works</h2>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                gap: 10, marginBottom: 22,
+              }}>
+                {[
+                  { id: "picks", icon: "💰", title: "Picks", color: "#1a73e8",
+                    desc: "Every bet with a statistical edge, ranked and tagged. Filter by strategy — Sharp money, raw Value, Stale lines, Reverse Line Movement, or Narrative fades." },
+                  { id: "parlays", icon: "🎰", title: "Parlays", color: "#7c3aed",
+                    desc: "Auto-built 3-leg parlays from our +EV pool, plus Same-Game correlated combos with real math behind them." },
+                  { id: "games", icon: "📊", title: "Games", color: "#0d9f4f",
+                    desc: "Live odds across 6 sportsbooks side-by-side, plus live scores so you know which games are still live." },
+                  { id: "record", icon: "📈", title: "Track Record", color: "#d97706",
+                    desc: "Every pick we've recommended gets settled against real results. See our actual win rates by strategy — no hiding." },
+                ].map(card => (
+                  <button key={card.id} onClick={() => setActiveTab(card.id)} style={{
+                    background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14,
+                    padding: "16px 18px", textAlign: "left", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    borderTop: `3px solid ${card.color}`,
+                  }}>
+                    <div style={{ fontSize: 22, marginBottom: 6 }}>{card.icon}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>{card.title}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>{card.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Strategy guides */}
+              <h2 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>Learn the Strategies</h2>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginBottom: 20 }}>
+                {[
+                  { to: "/ev-betting", title: "EV Betting", desc: "The math behind every pick", icon: "📐" },
+                  { to: "/sharp-betting", title: "Sharp Betting", desc: "How pros move lines", icon: "🧠" },
+                  { to: "/stale-line-detector", title: "Stale Lines", desc: "When books lag the market", icon: "⏱️" },
+                  { to: "/reverse-line-movement", title: "Reverse Line Movement", desc: "Follow the smart money", icon: "🔄" },
+                ].map(g => (
+                  <Link key={g.to} to={g.to} style={{
+                    background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
+                    padding: "12px 14px", display: "flex", alignItems: "center", gap: 12,
+                    textDecoration: "none",
+                  }}>
+                    <span style={{ fontSize: 22, flexShrink: 0 }}>{g.icon}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1d23" }}>{g.title}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{g.desc}</div>
+                    </div>
+                    <span style={{ marginLeft: "auto", color: "#c4c9d0", flexShrink: 0 }}>›</span>
+                  </Link>
+                ))}
+              </div>
+
+              {/* Affiliate CTA */}
+              <div style={{
+                background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14,
+                padding: 18, textAlign: "center", marginBottom: 8,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Ready to place a bet?</div>
+                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users on DraftKings get up to $1,000 in bonus bets</div>
+                <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                  display: "inline-block", padding: "10px 28px", borderRadius: 10, border: "none",
+                  background: "linear-gradient(135deg, #1a1d23, #2d3748)", color: "#fff",
+                  fontSize: 13, fontWeight: 800, textDecoration: "none",
+                }}>Claim Bonus →</a>
+                <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* ── PICKS TAB (unified) ── */}
+        {activeTab === "picks" && (() => {
+          const normalized = [];
+          sharpPlays.forEach(p => normalized.push({
+            kind: "sharp", label: "Sharp", color: "#1a73e8",
+            reason: `${p.totalScore}/100 · ${p.confidenceLabel}`,
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
+            game: p.game, commence: p.commence,
+            odds: p.odds, book: p.book,
+            sortKey: p.totalScore || parseFloat(p.ev || 0),
+            edgeLabel: `+${p.ev}% EV`,
+          }));
+          valueBets.forEach(p => normalized.push({
+            kind: "value", label: "Value", color: "#0d9f4f",
+            reason: "Market-beating price vs consensus",
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
+            game: p.game, commence: p.game.commence_time,
+            odds: p.odds, book: p.book,
+            sortKey: parseFloat(p.ev || 0),
+            edgeLabel: `+${p.ev}% EV`,
+          }));
+          staleLines.forEach(p => normalized.push({
+            kind: "stale", label: "Stale Line", color: "#dc2626",
+            reason: `${p.booksAgreed}/${p.totalBooks} books agree on consensus · ${p.diff} pts off`,
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
+            game: p.game, commence: p.commence,
+            odds: p.staleOdds, book: p.staleBook,
+            sortKey: parseFloat(p.diff || 0) * 10,
+            edgeLabel: `${p.diff} pts off market`,
+          }));
+          rlmPlays.forEach(p => normalized.push({
+            kind: "rlm", label: "Reverse Line", color: "#7c3aed",
+            reason: `Sharp books moved; ${p.bestBook} still offers public price`,
+            title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
+            marketLabel: p.marketType === "h2h" ? "Moneyline" : "Spread",
+            game: p.game, commence: p.commence,
+            odds: p.bestOdds, book: p.bestBook,
+            sortKey: parseFloat(p.lineRange || 0) * 5,
+            edgeLabel: `${p.lineRange} pts spread`,
+          }));
+          narrativePlays.forEach(p => normalized.push({
+            kind: "narrative", label: "Narrative Fade", color: "#d97706",
+            reason: `Blowout overreaction: lost to ${p.blowoutInfo.opponent} by ${p.blowoutInfo.margin}`,
+            title: `${p.blowoutTeam} +${p.bestSpread}`,
+            marketLabel: "Spread",
+            game: p.game, commence: p.commence,
+            odds: p.bestOdds, book: p.bestBook,
+            sortKey: Math.abs(p.blowoutInfo.margin || 0),
+            edgeLabel: `+${p.bestSpread} spread`,
+          }));
+
+          const filtered = normalized.filter(p =>
+            (pickFilter === "all" || pickFilter === p.kind) &&
+            (activeSport === "all" || p.game?.sport_key === activeSport)
+          ).sort((a, b) => (b.sortKey || 0) - (a.sortKey || 0));
+
+          const chips = [
+            { id: "all", label: "All Picks", count: normalized.length, color: "#1a1d23" },
+            { id: "sharp", label: "🧠 Sharp", count: sharpPlays.length, color: "#1a73e8" },
+            { id: "value", label: "⚡ Value", count: valueBets.length, color: "#0d9f4f" },
+            { id: "stale", label: "⏱️ Stale", count: staleLines.length, color: "#dc2626" },
+            { id: "rlm", label: "🔄 RLM", count: rlmPlays.length, color: "#7c3aed" },
+            { id: "narrative", label: "📉 Narrative", count: narrativePlays.length, color: "#d97706" },
+          ];
+
+          const bannerStats = pickFilter === "all" ? null : strategyStats[pickFilter];
+          const bannerLabel = {
+            sharp: "Sharp Plays", value: "Value Bets", stale: "Stale Lines",
+            rlm: "RLM Plays", narrative: "Narrative Plays",
+          }[pickFilter];
+
+          return (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#1a1d23" }}>
+                  Today's Picks
+                </h2>
+                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                  Every bet with a statistical edge, ranked by strength. Tap a chip to filter by strategy.
+                </div>
+              </div>
+
+              {/* Strategy chips */}
+              <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 10, marginBottom: 10 }}>
+                {chips.map(c => {
+                  const isActive = pickFilter === c.id;
+                  return (
+                    <button key={c.id} onClick={() => setPickFilter(c.id)} style={{
+                      padding: "8px 14px", borderRadius: 20, border: `1px solid ${isActive ? c.color : "#e2e5ea"}`,
+                      background: isActive ? c.color : "#fff", color: isActive ? "#fff" : "#4a5568",
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                      fontFamily: "'DM Sans', sans-serif", flexShrink: 0,
+                    }}>
+                      {c.label} <span style={{ opacity: 0.7, fontWeight: 600 }}>({c.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {bannerStats && <PerformanceBanner stats={bannerStats} label={bannerLabel} />}
+
+              {/* Feed */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {filtered.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                    <div style={{ fontSize: 13 }}>No picks match your filter. Try "All Picks" or a different sport.</div>
+                  </div>
+                )}
+                {filtered.map((p, i) => {
+                  const sportIcon = SPORTS.find(s => s.id === p.game?.sport_key)?.icon || "";
+                  return (
+                    <div key={`${p.kind}-${i}`} style={{
+                      background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${p.color}`,
+                      borderRadius: 12, padding: "12px 14px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                      animation: `fadeSlideIn 0.35s ease ${Math.min(i, 10) * 0.03}s both`,
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
+                              color: p.color, background: `${p.color}14`, padding: "2px 7px", borderRadius: 4,
+                            }}>{p.label}</span>
+                            <span style={{ fontSize: 10, color: "#8b919a", fontWeight: 600 }}>{p.marketLabel}</span>
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: "#1a1d23", lineHeight: 1.3 }}>
+                            {p.title}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                            {sportIcon} {p.game?.away_team} @ {p.game?.home_team}
+                            {p.commence ? ` · ${formatTime(p.commence)}` : ""}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#4a5568", marginTop: 6, lineHeight: 1.4 }}>
+                            {p.reason}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{
+                            fontSize: 18, fontWeight: 800,
+                            color: p.odds > 0 ? "#0d9f4f" : "#1a1d23",
+                            fontFamily: "'Space Mono', monospace",
+                          }}>
+                            {formatOdds(p.odds)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 4 }}>{p.book}</div>
+                          <div style={{
+                            fontSize: 10, fontWeight: 700, color: p.color,
+                            background: `${p.color}12`, padding: "2px 6px", borderRadius: 4, display: "inline-block",
+                          }}>{p.edgeLabel}</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                        <a href={BOOK_URLS[p.book] || "#"} target="_blank" rel="noopener noreferrer" style={{
+                          padding: "6px 14px", borderRadius: 8, background: p.color, color: "#fff",
+                          fontSize: 11, fontWeight: 800, textDecoration: "none",
+                        }}>Bet on {p.book} →</a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Affiliate CTA */}
+              <div style={{
+                marginTop: 20, background: "#fff", border: "1px solid #e2e5ea",
+                borderRadius: 14, padding: 18, textAlign: "center",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Place these on DraftKings</div>
+                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
+                <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
+                  display: "inline-block", padding: "10px 28px", borderRadius: 10,
+                  background: "#1a73e8", color: "#fff", fontSize: 13, fontWeight: 800, textDecoration: "none",
+                }}>Claim Bonus →</a>
+                <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* ── GAMES TAB (odds + live scores) ── */}
+        {activeTab === "games" && (
+          <div style={{
+            display: "flex", gap: 4, background: "#f0f1f3", borderRadius: 10,
+            padding: 4, marginBottom: 14, maxWidth: 340,
+          }}>
+            {[
+              { id: "odds", label: "📊 Odds" },
+              { id: "scores", label: "🏆 Live Scores" },
+            ].map(s => (
+              <button key={s.id} onClick={() => setGamesSub(s.id)} style={{
+                flex: 1, padding: "8px 12px", borderRadius: 8, border: "none",
+                background: gamesSub === s.id ? "#fff" : "transparent",
+                color: gamesSub === s.id ? "#1a73e8" : "#6b7280",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                boxShadow: gamesSub === s.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              }}>{s.label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* ── LIVE SCORES ── */}
+        {activeTab === "games" && gamesSub === "scores" && (
           <>
             <h2 style={{ margin: "0 0 14px", fontSize: 18, fontWeight: 800, color: "#1a1d23" }}>
               Live Scores & Today's Games
@@ -1579,352 +2001,32 @@ export default function App() {
           </>
         )}
 
-        {/* ── SHARP PLAYS TAB ── */}
-        {activeTab === "sharp" && (
-          <>
-            <PerformanceBanner stats={strategyStats.sharp} label="Sharp Plays" />
-            {/* Research explainer */}
-            <div style={{
-              background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
-              borderRadius: 14,
-              padding: "20px 18px",
-              marginBottom: 18,
-              color: "#fff",
-            }}>
-              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 22 }}>🧠</span> How Sharp Plays Works
-              </div>
-              <div style={{ fontSize: 13, lineHeight: 1.8, color: "#cbd5e0" }}>
-                Sharp Plays uses a <strong style={{ color: "#fff" }}>composite scoring system (0-100 pts)</strong> that combines four research-backed strategies to surface the most statistically advantageous bets:
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14 }}>
-                <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#63b3ed", marginBottom: 4 }}>1. Odds Discrepancy (0-30 pts)</div>
-                  <div style={{ fontSize: 11, color: "#a0aec0", lineHeight: 1.5 }}>
-                    Detects when one sportsbook's line deviates from the market consensus. Research on <strong style={{ color: "#cbd5e0" }}>Closing Line Value (CLV)</strong> from Pinnacle shows bettors who consistently beat the closing number see 2-3x higher long-term ROI.
-                  </div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#68d391", marginBottom: 4 }}>2. Underdog Value (0-25 pts)</div>
-                  <div style={{ fontSize: 11, color: "#a0aec0", lineHeight: 1.5 }}>
-                    <strong style={{ color: "#cbd5e0" }}>Sports Insights (2007-2023)</strong>: NFL underdogs getting {"<"}20% of public bets covered 57.1% ATS with +12.8% ROI. Home underdogs are even stronger — Bet Labs found NFL divisional home dogs covered 71% ATS.
-                  </div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#d6bcfa", marginBottom: 4 }}>3. Market Divergence (0-25 pts)</div>
-                  <div style={{ fontSize: 11, color: "#a0aec0", lineHeight: 1.5 }}>
-                    Identifies <strong style={{ color: "#cbd5e0" }}>reverse line movement patterns</strong> — when most books cluster at one price but an outlier offers significantly better value, it often means sharp money has moved the line at some books but not others.
-                  </div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#fbd38d", marginBottom: 4 }}>4. EV Strength (0-20 pts)</div>
-                  <div style={{ fontSize: 11, color: "#a0aec0", lineHeight: 1.5 }}>
-                    Pure mathematical edge — comparing each line's implied probability against the vig-removed market average. Higher EV = larger expected return per dollar wagered.
-                  </div>
-                </div>
-              </div>
-              <div style={{ marginTop: 14, fontSize: 11, color: "#718096", lineHeight: 1.6, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12 }}>
-                <strong style={{ color: "#a0aec0" }}>Sources:</strong> Levitt, S. (2004) "Why are gambling markets organised so differently from financial markets?" <em>The Economic Journal</em> · Humphreys et al. (2013) "Closing line value and the wisdom of the crowd" · Sports Insights database (2007-2023) · Bet Labs Systems (Action Network)
-              </div>
-            </div>
 
-            {/* Stats row */}
-            <div style={{ display: "flex", gap: 10, marginBottom: 18, overflowX: "auto" }}>
-              <StatCard
-                label="Sharp Plays"
-                value={sharpPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).length}
-                sub="composite scored"
-              />
-              <StatCard
-                label="Top Score"
-                value={(() => {
-                  const filtered = sharpPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport);
-                  return filtered.length > 0 ? `${filtered[0].totalScore}/100` : "—";
-                })()}
-                color="#7c3aed"
-                sub="confidence rating"
-              />
-              <StatCard
-                label="Elite Picks"
-                value={sharpPlays.filter(p => (activeSport === "all" || p.game.sport_key === activeSport) && p.confidence >= 4).length}
-                color="#0d9f4f"
-                sub="strong or elite"
-              />
-            </div>
 
-            <h2 style={{ margin: "0 0 12px", fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>
-              Top Ranked Sharp Plays
-            </h2>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {sharpPlays
-                .filter(p => activeSport === "all" || p.game.sport_key === activeSport)
-                .map((play, i) => {
-                  const marketLabel = play.marketType === "h2h" ? "Moneyline" : play.marketType === "spreads" ? "Spread" : "Total";
-                  const sportIcon = SPORTS.find(s => s.id === play.game.sport_key)?.icon || "";
-                  return (
-                    <div key={`${play.game.id}-${play.outcome}-${play.book}-${i}`} style={{
-                      background: "#fff",
-                      border: `1px solid ${play.confidence >= 4 ? "#c5d7f5" : "#e2e5ea"}`,
-                      borderRadius: 14,
-                      overflow: "hidden",
-                      boxShadow: play.confidence >= 4 ? "0 2px 8px rgba(26,115,232,0.1)" : "0 1px 3px rgba(0,0,0,0.06)",
-                      animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
-                    }}>
-                      {/* Header with score badge */}
-                      <div style={{
-                        padding: "12px 16px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        borderBottom: "1px solid #f0f1f3",
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{
-                            width: 42, height: 42, borderRadius: 12,
-                            background: `${play.confidenceColor}15`,
-                            border: `2px solid ${play.confidenceColor}`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 18, fontWeight: 900, fontFamily: "'Space Mono', monospace",
-                            color: play.confidenceColor,
-                          }}>
-                            {play.totalScore}
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1d23" }}>
-                              {play.outcome} {play.point ? `(${play.point > 0 ? '+' : ''}${play.point})` : ''} — {marketLabel}
-                            </div>
-                            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                              {sportIcon} {play.game.away_team} @ {play.game.home_team} · {formatTime(play.commence)}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{
-                            fontSize: 20, fontWeight: 800, fontFamily: "'Space Mono', monospace",
-                            color: play.odds > 0 ? "#0d9f4f" : "#1a1d23",
-                          }}>
-                            {formatOdds(play.odds)}
-                          </div>
-                          <div style={{
-                            fontSize: 10, fontWeight: 700,
-                            padding: "2px 8px", borderRadius: 4,
-                            background: `${play.confidenceColor}15`,
-                            color: play.confidenceColor,
-                            display: "inline-block",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.05em",
-                          }}>
-                            {play.confidenceLabel}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Factor breakdown bar */}
-                      <div style={{ padding: "10px 16px", background: "#f8f9fa" }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
-                          Score Breakdown
-                        </div>
-                        <div style={{ display: "flex", gap: 3, height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 8 }}>
-                          <div style={{ width: `${play.factors.discrepancy}%`, background: "#63b3ed", minWidth: play.factors.discrepancy > 0 ? 2 : 0 }} />
-                          <div style={{ width: `${play.factors.underdog}%`, background: "#68d391", minWidth: play.factors.underdog > 0 ? 2 : 0 }} />
-                          <div style={{ width: `${play.factors.divergence}%`, background: "#d6bcfa", minWidth: play.factors.divergence > 0 ? 2 : 0 }} />
-                          <div style={{ width: `${play.factors.evStrength}%`, background: "#fbd38d", minWidth: play.factors.evStrength > 0 ? 2 : 0 }} />
-                          <div style={{ flex: 1, background: "#e2e5ea" }} />
-                        </div>
-                        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                          {play.factors.discrepancy > 0 && (
-                            <span style={{ fontSize: 10, color: "#63b3ed", fontWeight: 600 }}>Discrepancy {play.factors.discrepancy}pt</span>
-                          )}
-                          {play.factors.underdog > 0 && (
-                            <span style={{ fontSize: 10, color: "#48bb78", fontWeight: 600 }}>Underdog {play.factors.underdog}pt</span>
-                          )}
-                          {play.factors.divergence > 0 && (
-                            <span style={{ fontSize: 10, color: "#9f7aea", fontWeight: 600 }}>Divergence {play.factors.divergence}pt</span>
-                          )}
-                          {play.factors.evStrength > 0 && (
-                            <span style={{ fontSize: 10, color: "#d69e2e", fontWeight: 600 }}>EV {play.factors.evStrength}pt</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Footer with EV + CTA */}
-                      <div style={{
-                        padding: "10px 16px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        borderTop: "1px solid #e2e5ea",
-                      }}>
-                        <div style={{ display: "flex", gap: 16 }}>
-                          <div>
-                            <div style={{ fontSize: 9, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>EV</div>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>+{play.ev}%</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 9, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>Edge</div>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>+{play.edge}%</div>
-                          </div>
-                        </div>
-                        <a
-                          href={BOOK_URLS[play.book] || "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            padding: "7px 14px",
-                            borderRadius: 8,
-                            background: "#1a73e8",
-                            border: "none",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: "#fff",
-                            textDecoration: "none",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Bet on {play.book} →
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-              {sharpPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).length === 0 && (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>🧠</div>
-                  <div style={{ fontSize: 13 }}>No sharp plays found for this filter. Check back closer to game time.</div>
-                </div>
-              )}
-            </div>
-
-            {/* Affiliate CTA */}
-            <div style={{
-              marginTop: 20,
-              background: "#fff",
-              border: "1px solid #e2e5ea",
-              borderRadius: 14,
-              padding: 18,
-              textAlign: "center",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Bet Sharp on DraftKings</div>
-              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
-              <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
-                display: "inline-block",
-                padding: "10px 28px",
-                borderRadius: 10,
-                border: "none",
-                background: "linear-gradient(135deg, #1a1d23, #2d3748)",
-                color: "#fff",
-                fontSize: 13,
-                fontWeight: 800,
-                cursor: "pointer",
-                letterSpacing: "0.02em",
-                textDecoration: "none",
-              }}>
-                Claim Bonus →
-              </a>
-              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
-            </div>
-
-            {/* Related guides */}
-            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Link to="/sharp-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn Sharp Betting →</Link>
-              <Link to="/reverse-line-movement" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Reverse Line Movement →</Link>
-              <Link to="/ev-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>EV Betting Guide →</Link>
-            </div>
-          </>
-        )}
-
-        {/* ── VALUE BETS TAB ── */}
-        {activeTab === "value" && (
-          <>
-            <PerformanceBanner stats={strategyStats.value} label="Value Bets" />
-            {/* How it works explainer */}
-            <div style={{
-              background: "#e8f0fe",
-              border: "1px solid #c5d7f5",
-              borderRadius: 14,
-              padding: "16px 18px",
-              marginBottom: 18,
-            }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23", marginBottom: 6 }}>How We Find Value Bets</div>
-              <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.7 }}>
-                We compare odds from <strong style={{ color: "#1a1d23" }}>6 sportsbooks</strong> for every game.
-                When one book's odds are better than the average, that's a <strong style={{ color: "#0d9f4f" }}>+EV (positive expected value)</strong> bet —
-                meaning the payout is higher than the true probability suggests. The higher the <strong style={{ color: "#1a73e8" }}>EV%</strong>, the bigger the edge.
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, marginBottom: 18, overflowX: "auto" }}>
-              <StatCard label="Bets Found" value={filteredValue.length} sub="with a positive edge" />
-              <StatCard label="Best Edge" value={`+${topEdge}%`} color="#00ff88" sub="expected value" />
-              <StatCard label="Avg Edge" value={`+${avgEV}%`} color="#00f0ff" sub="across all bets" />
-            </div>
-
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
-            }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1a1d23" }}>
-                Top Value Picks
-              </h2>
-              <span style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
-                Updated {lastRefresh.toLocaleTimeString()}
-              </span>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {filteredValue.map((bet, i) => (
-                <ValueBetCard key={`${bet.game.id}-${bet.outcome}-${bet.book}`} bet={bet} index={i} />
-              ))}
-              {filteredValue.length === 0 && (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-                  <div style={{ fontSize: 13 }}>No value bets found for this filter</div>
-                </div>
-              )}
-            </div>
-
-            {/* Affiliate CTA */}
-            <div style={{
-              marginTop: 20,
-              background: "#fff",
-              border: "1px solid #e2e5ea",
-              borderRadius: 14,
-              padding: 18,
-              textAlign: "center",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Place these bets on DraftKings</div>
-              <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12 }}>New users get up to $1,000 in bonus bets</div>
-              <a href="https://www.draftkings.com/sportsbook" target="_blank" rel="noopener noreferrer" style={{
-                display: "inline-block",
-                padding: "10px 28px",
-                borderRadius: 10,
-                border: "none",
-                background: "#1a73e8",
-                color: "#fff",
-                fontSize: 13,
-                fontWeight: 800,
-                cursor: "pointer",
-                letterSpacing: "0.02em",
-                textDecoration: "none",
-              }}>
-                Claim Bonus →
-              </a>
-              <div style={{ fontSize: 9, color: "#aab0b8", marginTop: 6 }}>21+ | Gambling problem? Call 1-800-522-4700</div>
-            </div>
-
-            {/* Related guides */}
-            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Link to="/ev-betting" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>EV Betting Guide →</Link>
-              <Link to="/odds-comparison" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Odds Comparison →</Link>
-              <Link to="/stale-line-detector" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Stale Line Detector →</Link>
-            </div>
-          </>
-        )}
-
-        {/* ── PARLAYS TAB ── */}
+        {/* ── PARLAYS TAB (with sub-toggle for Safe vs. Correlated) ── */}
         {activeTab === "parlays" && (
+          <div style={{
+            display: "flex", gap: 4, background: "#f0f1f3", borderRadius: 10,
+            padding: 4, marginBottom: 14, maxWidth: 380,
+          }}>
+            {[
+              { id: "safe", label: "🎰 Safe Parlays" },
+              { id: "correlated", label: "🔗 Same-Game" },
+            ].map(s => (
+              <button key={s.id} onClick={() => setParlaySub(s.id)} style={{
+                flex: 1, padding: "8px 12px", borderRadius: 8, border: "none",
+                background: parlaySub === s.id ? "#fff" : "transparent",
+                color: parlaySub === s.id ? "#7c3aed" : "#6b7280",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                boxShadow: parlaySub === s.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              }}>{s.label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* ── SAFE PARLAYS ── */}
+        {activeTab === "parlays" && parlaySub === "safe" && (
           <>
             {/* Parlay explainer */}
             <div style={{
@@ -2165,8 +2267,8 @@ export default function App() {
           </>
         )}
 
-        {/* ── LIVE ODDS TAB ── */}
-        {activeTab === "odds" && (
+        {/* ── LIVE ODDS ── */}
+        {activeTab === "games" && gamesSub === "odds" && (
           <>
             <div style={{ marginBottom: 14 }}>
               <input
@@ -2222,255 +2324,10 @@ export default function App() {
           </>
         )}
 
-        {/* ── ALERTS TAB ── */}
-        {activeTab === "alerts" && (
-          <>
-            <div style={{
-              textAlign: "center",
-              padding: "20px 0",
-            }}>
-              <button
-                onClick={() => setShowAlertBuilder(true)}
-                style={{
-                  padding: "13px 28px",
-                  borderRadius: 12,
-                  border: "none",
-                  background: "#1a73e8",
-                  color: "#fff",
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  letterSpacing: "0.02em",
-                  fontFamily: "'DM Sans', sans-serif",
-                  marginBottom: 20,
-                }}
-              >
-                + Create New Alert
-              </button>
-            </div>
 
-            {/* Sample alerts */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                { type: "+EV Bet", sport: "NBA", condition: "EV > 3%", status: "active", triggered: "2 hits today" },
-                { type: "Line Move", sport: "NFL", condition: "> 2 pts", status: "active", triggered: "Last: 3h ago" },
-                { type: "Underdog", sport: "Any", condition: "ML > +300", status: "paused", triggered: "5 hits this week" },
-              ].map((alert, i) => (
-                <div key={i} style={{
-                  background: "#fff",
-                  border: "1px solid #e2e5ea",
-                  borderRadius: 12,
-                  padding: "14px 16px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                  animation: `fadeSlideIn 0.4s ease ${i * 0.1}s both`,
-                }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23", marginBottom: 2 }}>{alert.type}</div>
-                    <div style={{ fontSize: 11, color: "#6b7280" }}>{alert.sport} · {alert.condition}</div>
-                    <div style={{ fontSize: 10, color: "#8b919a", marginTop: 2 }}>{alert.triggered}</div>
-                  </div>
-                  <div style={{
-                    padding: "4px 10px",
-                    borderRadius: 6,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.1em",
-                    background: alert.status === "active" ? "#ecfdf5" : "#f0f1f3",
-                    color: alert.status === "active" ? "#0d9f4f" : "#8b919a",
-                    border: `1px solid ${alert.status === "active" ? "#a7f3d0" : "#dde1e6"}`,
-                  }}>
-                    {alert.status}
-                  </div>
-                </div>
-              ))}
-            </div>
 
-            {/* How alerts work */}
-            <div style={{
-              marginTop: 20,
-              padding: 16,
-              borderRadius: 12,
-              background: "#e8f0fe",
-              border: "1px solid #c5d7f5",
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1d23", marginBottom: 8 }}>How Alerts Work</div>
-              <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.6 }}>
-                Set your criteria and we scan odds across 6+ sportsbooks every 60 seconds. When conditions are met, you get a push notification with the bet details and best available line.
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ── STALE LINE DETECTOR TAB ── */}
-        {activeTab === "stale" && (
-          <>
-            <PerformanceBanner stats={strategyStats.stale} label="Stale Lines" />
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Stale Line Detector</div>
-              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Lines where one book hasn't caught up to the market consensus. These are genuine +EV opportunities — bet before they correct.</div>
-            </div>
-
-            {staleLines.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
-                <div style={{ fontSize: 13 }}>No stale lines detected right now. Check back when more games are on the board.</div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {staleLines.filter(s => activeSport === "all" || s.game.sport_key === activeSport).map((sl, i) => {
-                const sportIcon = SPORTS.find(s => s.id === sl.game.sport_key)?.icon || "";
-                const marketLabel = sl.marketType === "h2h" ? "Moneyline" : sl.marketType === "spreads" ? "Spread" : "Total";
-                return (
-                  <div key={`stale-${i}`} style={{
-                    background: "#fff", border: "1px solid #fecaca", borderLeft: "3px solid #dc2626",
-                    borderRadius: 12, overflow: "hidden",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
-                  }}>
-                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
-                            {sl.outcome} {sl.point ? `(${sl.point > 0 ? '+' : ''}${sl.point})` : ''} — {marketLabel}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                            {sportIcon} {sl.game.away_team} @ {sl.game.home_team} · {formatTime(sl.commence)}
-                          </div>
-                        </div>
-                        <div style={{
-                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                          background: "#fef2f2", color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.05em",
-                        }}>STALE</div>
-                      </div>
-                    </div>
-                    <div style={{ padding: "10px 16px", background: "#fefaf0" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Stale Book</div>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: "#dc2626", fontFamily: "'Space Mono', monospace" }}>
-                            {formatOdds(sl.staleOdds)} <span style={{ fontSize: 12, fontWeight: 600 }}>on {sl.staleBook}</span>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Market Median</div>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: "#4a5568", fontFamily: "'Space Mono', monospace" }}>
-                            {formatOdds(sl.marketMedian)}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>
-                        {sl.booksAgreed}/{sl.totalBooks} books agree on the consensus · {sl.diff} pts off market
-                      </div>
-                    </div>
-                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ fontSize: 11, color: "#8b919a" }}>
-                        All books: {sl.allBookOdds.map(b => `${b.book} ${formatOdds(b.odds)}`).join(" · ")}
-                      </div>
-                      <a href={BOOK_URLS[sl.staleBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
-                        padding: "6px 12px", borderRadius: 8, background: "#dc2626", color: "#fff",
-                        fontSize: 11, fontWeight: 700, textDecoration: "none",
-                      }}>Bet on {sl.staleBook} →</a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <Link to="/stale-line-detector" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how stale line detection works →</Link>
-            </div>
-          </>
-        )}
-
-        {/* ── REVERSE LINE MOVEMENT TAB ── */}
-        {activeTab === "rlm" && (
-          <>
-            <PerformanceBanner stats={strategyStats.rlm} label="RLM Plays" />
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Reverse Line Movement</div>
-              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Games where sharp money has moved some books but the public side still offers better odds elsewhere. Bet with the sharp books, at the public price.</div>
-            </div>
-
-            {rlmPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🔄</div>
-                <div style={{ fontSize: 13 }}>No reverse line movement detected. Check back closer to game time.</div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {rlmPlays.filter(p => activeSport === "all" || p.game.sport_key === activeSport).map((play, i) => {
-                const sportIcon = SPORTS.find(s => s.id === play.game.sport_key)?.icon || "";
-                const marketLabel = play.marketType === "h2h" ? "Moneyline" : "Spread";
-                return (
-                  <div key={`rlm-${i}`} style={{
-                    background: "#fff", border: "1px solid #ddd0f5", borderLeft: "3px solid #7c3aed",
-                    borderRadius: 12, overflow: "hidden",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
-                  }}>
-                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
-                            {play.outcome} {play.point ? `(${play.point > 0 ? '+' : ''}${play.point})` : ''} — {marketLabel}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                            {sportIcon} {play.game.away_team} @ {play.game.home_team} · {formatTime(play.commence)}
-                          </div>
-                        </div>
-                        <div style={{
-                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                          background: "#f3edff", color: "#7c3aed", textTransform: "uppercase",
-                        }}>RLM</div>
-                      </div>
-                    </div>
-                    <div style={{ padding: "12px 16px" }}>
-                      <div style={{ display: "flex", gap: 20, marginBottom: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Best Available</div>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
-                            {formatOdds(play.bestOdds)}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>on {play.bestBook}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Line Range</div>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: "#4a5568", fontFamily: "'Space Mono', monospace" }}>
-                            {play.lineRange} pts
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>spread across books</div>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>
-                        <strong style={{ color: "#7c3aed" }}>Sharp side:</strong> {play.sharpBooks.map(b => `${b.book} (${formatOdds(b.odds)})`).join(", ")}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>
-                        <strong style={{ color: "#1a73e8" }}>Public side:</strong> {play.publicBooks.map(b => `${b.book} (${formatOdds(b.odds)})`).join(", ")}
-                      </div>
-                    </div>
-                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", textAlign: "right" }}>
-                      <a href={BOOK_URLS[play.bestBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
-                        padding: "6px 12px", borderRadius: 8, background: "#7c3aed", color: "#fff",
-                        fontSize: 11, fontWeight: 700, textDecoration: "none",
-                      }}>Bet on {play.bestBook} →</a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <Link to="/reverse-line-movement" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how reverse line movement works →</Link>
-            </div>
-          </>
-        )}
-
-        {/* ── CORRELATED PARLAYS TAB ── */}
-        {activeTab === "correlated" && (
+        {/* ── CORRELATED PARLAYS (under Parlays tab) ── */}
+        {activeTab === "parlays" && parlaySub === "correlated" && (
           <>
             <PerformanceBanner stats={strategyStats.correlated} label="Correlated Parlays" />
             <div style={{ marginBottom: 16 }}>
@@ -2554,233 +2411,176 @@ export default function App() {
           </>
         )}
 
-        {/* ── NARRATIVE REGRESSION TAB ── */}
-        {activeTab === "narrative" && (
-          <>
-            <PerformanceBanner stats={strategyStats.narrative} label="Narrative Plays" />
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Narrative Regression</div>
-              <div style={{ fontSize: 12, color: "#8b919a", lineHeight: 1.6 }}>Teams that just got blown out are undervalued by the public. When the underlying quality hasn't changed, bet the correction.</div>
-            </div>
+        {/* ── TRACK RECORD TAB ── */}
+        {activeTab === "record" && (() => {
+          const rows = [
+            { id: "sharp", label: "Sharp Plays", color: "#1a73e8", icon: "🧠",
+              desc: "Composite-scored plays — discrepancy, underdog, divergence, EV." },
+            { id: "value", label: "Value Bets", color: "#0d9f4f", icon: "⚡",
+              desc: "Single-book prices that beat the vig-removed market median." },
+            { id: "stale", label: "Stale Lines", color: "#dc2626", icon: "⏱️",
+              desc: "Books slow to move — bet before the correction." },
+            { id: "rlm", label: "Reverse Line Movement", color: "#7c3aed", icon: "🔄",
+              desc: "Sharp books moved, public books didn't — bet the public price." },
+            { id: "correlated", label: "Correlated Parlays", color: "#16a34a", icon: "🔗",
+              desc: "Same-game legs that are statistically linked — books underprice the correlation." },
+            { id: "narrative", label: "Narrative Regression", color: "#d97706", icon: "📉",
+              desc: "Fade the overreaction after a blowout loss." },
+          ];
+          const totalWins = Object.values(strategyStats).reduce((sum, s) => sum + (s?.wins || 0), 0);
+          const totalLosses = Object.values(strategyStats).reduce((sum, s) => sum + (s?.losses || 0), 0);
+          const totalPushes = Object.values(strategyStats).reduce((sum, s) => sum + (s?.pushes || 0), 0);
+          const totalSettledR = Object.values(strategyStats).reduce((sum, s) => sum + (s?.total || 0), 0);
+          const totalUnitsR = Object.values(strategyStats).reduce((sum, s) => sum + (typeof s?.units === "number" ? s.units : parseFloat(s?.units || 0)), 0);
+          const totalDecided = totalWins + totalLosses;
+          const overallPct = totalDecided > 0 ? ((totalWins / totalDecided) * 100).toFixed(1) : null;
+          const overallRoiR = totalSettledR > 0 ? (totalUnitsR / totalSettledR) * 100 : null;
+          const overallColor = overallRoiR === null ? "#8b919a"
+            : overallRoiR >= 5 ? "#0d9f4f" : overallRoiR >= 0 ? "#1a73e8" : "#e8a100";
 
-            {narrativePlays.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0", color: "#8b919a" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📉</div>
-                <div style={{ fontSize: 13, lineHeight: 1.6 }}>No narrative regression plays right now. This requires a team to have recently suffered a blowout loss with upcoming games on the board.</div>
+          return (
+            <>
+              <div style={{ marginBottom: 14 }}>
+                <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#1a1d23" }}>
+                  Track Record
+                </h2>
+                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                  Every pick we recommend gets saved and settled against real game results. No cherry-picking. No hiding losses.
+                </div>
               </div>
-            )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {narrativePlays.map((play, i) => {
-                const sportIcon = SPORTS.find(s => s.id === play.game.sport_key)?.icon || "";
-                return (
-                  <div key={`narr-${i}`} style={{
-                    background: "#fff", border: "1px solid #feebc8", borderLeft: "3px solid #d97706",
-                    borderRadius: 12, overflow: "hidden",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
-                  }}>
-                    <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f1f3" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>
-                            {play.blowoutTeam} +{play.bestSpread}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                            {sportIcon} {play.game.away_team} @ {play.game.home_team} · {formatTime(play.commence)}
-                          </div>
-                        </div>
-                        <div style={{
-                          padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                          background: "#fffff0", color: "#d97706", textTransform: "uppercase",
-                        }}>OVERREACTION</div>
-                      </div>
+              {/* Overall hero */}
+              <div style={{
+                background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
+                borderRadius: 16, padding: "20px 22px", marginBottom: 18, color: "#fff",
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#a0aec0", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 8 }}>
+                  Overall Performance
+                </div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 44, fontWeight: 900, color: overallColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
+                    {totalUnitsR >= 0 ? "+" : ""}{totalUnitsR.toFixed(2)}u
+                  </div>
+                  <div style={{ fontSize: 13, color: "#cbd5e0" }}>
+                    {overallRoiR === null ? "—" : `${overallRoiR >= 0 ? "+" : ""}${overallRoiR.toFixed(1)}% ROI`}
+                    <div style={{ fontSize: 11, color: "#8b919a", marginTop: 2 }}>
+                      {totalWins}W · {totalLosses}L{totalPushes > 0 ? ` · ${totalPushes}P` : ""} ({overallPct !== null ? `${overallPct}% win` : "—"}) · {totalSettledR} settled
                     </div>
-                    <div style={{ padding: "12px 16px" }}>
-                      <div style={{
-                        background: "#fff8f0", borderRadius: 8, padding: "10px 14px", marginBottom: 10,
-                        border: "1px solid #feebc8",
-                      }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#d97706", marginBottom: 4 }}>Recent Blowout</div>
-                        <div style={{ fontSize: 13, color: "#4a5568" }}>
-                          {play.blowoutInfo.team} lost to {play.blowoutInfo.opponent} ({play.blowoutInfo.score}) — margin of {play.blowoutInfo.margin}
+                  </div>
+                </div>
+                {totalDecided < SAMPLE_THRESHOLD && (
+                  <div style={{
+                    marginTop: 12, padding: "8px 12px", borderRadius: 8,
+                    background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)",
+                    fontSize: 11, color: "#fbd38d", lineHeight: 1.5,
+                  }}>
+                    Sample too small to draw conclusions. ROI becomes meaningful after 20+ settled picks per strategy.
+                  </div>
+                )}
+              </div>
+
+              {/* Per-strategy breakdown */}
+              <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>By Strategy</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                {rows.map(r => {
+                  const s = strategyStats[r.id] || { wins: 0, losses: 0, pushes: 0, total: 0, units: 0, roi: null, winPct: null };
+                  const decided = (s.wins || 0) + (s.losses || 0);
+                  const hasEnough = decided >= SAMPLE_THRESHOLD;
+                  const units = typeof s.units === "number" ? s.units : parseFloat(s.units || 0);
+                  const roi = s.roi === null || s.roi === undefined ? null : parseFloat(s.roi);
+                  const showRoi = hasEnough ? roi : null;
+                  const roiColor = showRoi === null ? "#8b919a"
+                    : showRoi >= 5 ? "#0d9f4f" : showRoi >= 0 ? "#1a73e8" : "#e8a100";
+
+                  return (
+                    <div key={r.id} style={{
+                      background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${r.color}`,
+                      borderRadius: 12, padding: "14px 16px",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>
+                            {r.icon} {r.label}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 1.5 }}>
+                            {r.desc}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{
+                            fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace",
+                            color: roiColor, lineHeight: 1,
+                          }}>
+                            {hasEnough ? `${units >= 0 ? "+" : ""}${units.toFixed(2)}u` : "—"}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#8b919a", marginTop: 3 }}>
+                            {showRoi === null ? "" : `${showRoi >= 0 ? "+" : ""}${showRoi.toFixed(1)}% ROI · `}{s.wins}W-{s.losses}L{s.pushes > 0 ? `-${s.pushes}P` : ""}
+                            {hasEnough && s.winPct ? ` (${s.winPct}% win)` : ""}
+                          </div>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 20 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Best Spread</div>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: "#0d9f4f", fontFamily: "'Space Mono', monospace" }}>
-                            +{play.bestSpread}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>on {play.bestBook}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase" }}>Odds</div>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d23", fontFamily: "'Space Mono', monospace" }}>
-                            {formatOdds(play.bestOdds)}
-                          </div>
-                        </div>
-                      </div>
-                      {play.allSpreads.length > 1 && (
-                        <div style={{ fontSize: 11, color: "#8b919a", marginTop: 8 }}>
-                          All books: {play.allSpreads.map(s => `${s.book} +${s.spread} (${formatOdds(s.odds)})`).join(" · ")}
+                      {!hasEnough && (
+                        <div style={{
+                          marginTop: 10, fontSize: 10, color: "#8b919a",
+                          background: "#f8f9fa", padding: "6px 10px", borderRadius: 6,
+                        }}>
+                          Building sample — {SAMPLE_THRESHOLD - decided} more settled picks until ROI is confident.
                         </div>
                       )}
                     </div>
-                    <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e5ea", textAlign: "right" }}>
-                      <a href={BOOK_URLS[play.bestBook] || "#"} target="_blank" rel="noopener noreferrer" style={{
-                        padding: "6px 12px", borderRadius: 8, background: "#d97706", color: "#fff",
-                        fontSize: 11, fontWeight: 700, textDecoration: "none",
-                      }}>Bet on {play.bestBook} →</a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <Link to="/narrative-regression" style={{ fontSize: 11, color: "#1a73e8", fontWeight: 600, textDecoration: "none" }}>Learn how narrative regression works →</Link>
-            </div>
-          </>
-        )}
+                  );
+                })}
+              </div>
 
-        {/* ── GUIDES TAB ── */}
-        {activeTab === "guides" && (
-          <>
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>Strategy Guides</div>
-              <div style={{ fontSize: 12, color: "#8b919a" }}>In-depth breakdowns of betting strategies, tools, and concepts</div>
-            </div>
+              {/* How it works */}
+              <div style={{
+                background: "#f8f9fa", border: "1px solid #e2e5ea", borderRadius: 14,
+                padding: "16px 18px", marginBottom: 8,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 8 }}>How We Track</div>
+                <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.7 }}>
+                  Every pick we surface gets saved to our database the moment it's recommended. A daily job pulls final scores from ESPN, matches them to pending picks, and settles each as a Win, Loss, or Push. We don't retroactively edit, delete, or hide losing picks — the numbers above include everything.
+                </div>
+                <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.7, marginTop: 10 }}>
+                  <strong>Units &amp; ROI methodology:</strong> Every pick is tracked as a flat 1-unit bet. A win at +200 pays +2.00 units; a win at -150 pays +0.67 units; a loss is -1.00. ROI = total units won ÷ total picks × 100. This is the industry-standard way to measure betting performance because it weights underdog wins heavier than favorite wins — a 55% win rate on +150 dogs crushes a 65% rate on -250 favorites. Win % alone can mislead; units and ROI can't. See the{' '}
+                  <button onClick={() => setLegalPage("disclaimer")} style={{ background: "none", border: "none", color: "#1a73e8", cursor: "pointer", fontWeight: 700, padding: 0, fontSize: 12, fontFamily: "inherit" }}>full disclaimer</button>{' '}for details.
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                { to: "/ev-betting", title: "Expected Value (EV) Betting", desc: "The math behind +EV betting and how to find edges the books miss", icon: "📐" },
-                { to: "/sharp-betting", title: "Sharp Betting Signals", desc: "How professional bettors move lines and how to follow the smart money", icon: "🧠" },
-                { to: "/odds-comparison", title: "Odds Comparison", desc: "Why line shopping across sportsbooks is the easiest edge in betting", icon: "📊" },
-                { to: "/parlay-calculator", title: "Parlay Strategy", desc: "When parlays make sense, when they don't, and how to build smarter ones", icon: "🎰" },
-                { to: "/reverse-line-movement", title: "Reverse Line Movement", desc: "When the line moves opposite to where the public is betting — and what it means", icon: "🔄" },
-                { to: "/correlated-parlays", title: "Correlated Parlays", desc: "Find legs that move together to build parlays with a real mathematical edge", icon: "🔗" },
-                { to: "/stale-line-detector", title: "Stale Line Detector", desc: "Spot sportsbooks that haven't caught up to the market — bet before they correct", icon: "⏱️" },
-                { to: "/narrative-regression", title: "Narrative Regression", desc: "When the market overreacts to a blowout or viral moment, bet the correction", icon: "📉" },
-                { to: "/betting-alerts", title: "Betting Alerts", desc: "Get notified when value appears — never miss a +EV opportunity again", icon: "🔔" },
-                { to: "/live-scores", title: "Live Scores for Bettors", desc: "Real-time scores built for bettors, not casual fans — with context that matters", icon: "🏆" },
-              ].map((guide, i) => (
-                <Link
-                  key={guide.to}
-                  to={guide.to}
-                  style={{
-                    background: "#fff",
-                    border: "1px solid #e2e5ea",
-                    borderRadius: 12,
-                    padding: "16px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    textDecoration: "none",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                    animation: `fadeSlideIn 0.4s ease ${i * 0.05}s both`,
-                    transition: "border-color 0.2s",
-                  }}
-                >
-                  <span style={{ fontSize: 28, lineHeight: 1, flexShrink: 0 }}>{guide.icon}</span>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23", marginBottom: 3 }}>{guide.title}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>{guide.desc}</div>
-                  </div>
-                  <span style={{ marginLeft: "auto", fontSize: 16, color: "#c4c9d0", flexShrink: 0 }}>›</span>
-                </Link>
-              ))}
-            </div>
-          </>
-        )}
       </div>
 
       {showAlertBuilder && <AlertBuilder onClose={() => setShowAlertBuilder(false)} />}
 
       {/* ── MOBILE BOTTOM TAB BAR ── */}
       {isMobile && (
-        <>
-          {/* More menu overlay */}
-          {showMoreMenu && (
-            <div
-              style={{
-                position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-                background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
-                zIndex: 950,
-              }}
-              onClick={() => setShowMoreMenu(false)}
-            >
-              <div
-                style={{
-                  position: "absolute", bottom: 0, left: 0, right: 0,
-                  background: "#1a1d23", borderRadius: "20px 20px 0 0",
-                  padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))",
-                  boxShadow: "0 -8px 32px rgba(0,0,0,0.4)",
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div style={{ width: 40, height: 4, background: "#4a5568", borderRadius: 2, margin: "0 auto 20px" }} />
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {[
-                    { id: "stale", label: "Stale Line Detector", icon: "⏱️", desc: "Lines where one book hasn't caught up" },
-                    { id: "rlm", label: "Reverse Line Movement", icon: "🔄", desc: "Sharp money vs. public money" },
-                    { id: "correlated", label: "Correlated Parlays", icon: "🔗", desc: "Same-game legs that move together" },
-                    { id: "narrative", label: "Narrative Regression", icon: "📉", desc: "Fade the overreaction" },
-                    { id: "scores", label: "Live Scores", icon: "🏆", desc: "Real-time scores & today's games" },
-                    { id: "alerts", label: "Betting Alerts", icon: "🔔", desc: "Set alerts for value opportunities" },
-                    { id: "guides", label: "Strategy Guides", icon: "📚", desc: "In-depth strategy breakdowns" },
-                  ].map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => { setActiveTab(item.id); setShowMoreMenu(false); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 14,
-                        padding: "14px 16px", borderRadius: 12,
-                        border: "none", background: activeTab === item.id ? "#1a73e8" : "rgba(255,255,255,0.06)",
-                        cursor: "pointer", textAlign: "left", width: "100%",
-                        fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      <span style={{ fontSize: 26, lineHeight: 1 }}>{item.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{item.label}</div>
-                        <div style={{ fontSize: 11, color: activeTab === item.id ? "#c5d7f5" : "#8b919a", marginTop: 2 }}>{item.desc}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <nav style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: "#1a1d23",
-            borderTop: "2px solid #2d3748",
-            display: "flex",
-            zIndex: 900,
-            padding: "8px 6px 4px",
-            paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
-            boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
-          }}>
-            {[
-              { id: "sharp", label: "Sharp", icon: "🧠" },
-              { id: "value", label: "Value", icon: "⚡" },
-              { id: "parlays", label: "Parlays", icon: "🎰" },
-              { id: "odds", label: "Odds", icon: "📊" },
-              { id: "more", label: "More", icon: "☰" },
-            ].map(tab => {
-              const isMoreActive = tab.id === "more" && ["scores", "alerts", "guides", "stale", "rlm", "correlated", "narrative"].includes(activeTab);
-              const isActive = tab.id === "more" ? isMoreActive : activeTab === tab.id;
-              return (
+        <nav style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: "#1a1d23",
+          borderTop: "2px solid #2d3748",
+          display: "flex",
+          zIndex: 900,
+          padding: "8px 4px 4px",
+          paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
+        }}>
+          {[
+            { id: "home", label: "Home", icon: "🏠" },
+            { id: "picks", label: "Picks", icon: "💰" },
+            { id: "parlays", label: "Parlays", icon: "🎰" },
+            { id: "games", label: "Games", icon: "📊" },
+            { id: "record", label: "Record", icon: "📈" },
+          ].map(tab => {
+            const isActive = activeTab === tab.id;
+            return (
               <button
                 key={tab.id}
-                onClick={() => {
-                  if (tab.id === "more") { setShowMoreMenu(m => !m); }
-                  else { setActiveTab(tab.id); setShowMoreMenu(false); }
-                }}
+                onClick={() => setActiveTab(tab.id)}
                 style={{
                   flex: 1,
                   padding: "8px 2px 6px",
@@ -2800,10 +2600,9 @@ export default function App() {
                 <span style={{ fontSize: 22, lineHeight: 1 }}>{tab.icon}</span>
                 <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.02em" }}>{tab.label}</span>
               </button>
-              );
-            })}
-          </nav>
-        </>
+            );
+          })}
+        </nav>
       )}
 
       {/* ── LEGAL PAGE MODAL ── */}
@@ -2946,6 +2745,23 @@ export default function App() {
 
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1a1d23", marginTop: 20, marginBottom: 8 }}>Third-Party Sportsbooks</h3>
                   <p>MyOddsy is not affiliated with, endorsed by, or officially connected to any sportsbook operator unless explicitly stated. All sportsbook names, logos, and trademarks are the property of their respective owners. Your relationship with any sportsbook is governed entirely by that sportsbook's terms and conditions. We are not responsible for any disputes between you and a sportsbook.</p>
+
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1a1d23", marginTop: 20, marginBottom: 8 }}>Track Record Methodology</h3>
+                  <p>The "Track Record" section displays historical performance statistics for picks generated by our algorithms. Performance is measured using <strong>units won</strong> and <strong>return on investment (ROI)</strong>, which are the standard methodologies used across professional sports betting analytics.</p>
+                  <p style={{ marginTop: 10 }}><strong>How picks are recorded:</strong> Every pick surfaced by the Service (Sharp Plays, Value Bets, Stale Lines, Reverse Line Movement, Correlated Parlays, Narrative Regression) is saved to our database at the moment it is recommended, using the odds available at the time of recommendation. We do not retroactively add, remove, or edit picks. Losing picks are included in all displayed statistics.</p>
+                  <p style={{ marginTop: 10 }}><strong>How picks are settled:</strong> A daily automated job retrieves final game results from publicly available third-party score providers (e.g., ESPN) and settles pending picks as a Win, Loss, or Push. Picks for games that cannot be matched to a final score within 48 hours of the scheduled start time are marked as "expired" and excluded from performance calculations. Matching relies on team name comparison and may fail in rare cases; unmatched picks are not counted as wins or losses.</p>
+                  <p style={{ marginTop: 10 }}><strong>Unit calculation:</strong> All picks are tracked as flat <strong>1-unit</strong> wagers regardless of any implied confidence, score, or edge percentage displayed on the site. A unit is an abstract accounting convention and does not represent any specific dollar amount. Profit and loss per pick is calculated using standard American-odds payout math:</p>
+                  <ul style={{ paddingLeft: 20, marginTop: 8, marginBottom: 8 }}>
+                    <li style={{ marginBottom: 6 }}><strong>Win at positive odds (+N):</strong> profit = N ÷ 100 units (e.g., +200 = +2.00u, +150 = +1.50u).</li>
+                    <li style={{ marginBottom: 6 }}><strong>Win at negative odds (-N):</strong> profit = 100 ÷ N units (e.g., -150 = +0.67u, -200 = +0.50u).</li>
+                    <li style={{ marginBottom: 6 }}><strong>Loss:</strong> -1.00 unit.</li>
+                    <li style={{ marginBottom: 6 }}><strong>Push (tie):</strong> 0.00 units (stake returned).</li>
+                    <li style={{ marginBottom: 6 }}><strong>Expired / unmatched:</strong> 0.00 units (excluded from ROI denominator).</li>
+                  </ul>
+                  <p style={{ marginTop: 10 }}><strong>ROI calculation:</strong> ROI = (total units won ÷ total settled picks) × 100, expressed as a percentage. A positive ROI indicates profit per unit wagered. A negative ROI indicates loss per unit wagered. ROI is the industry-standard metric because, unlike raw win percentage, it correctly weights wins on underdogs heavier than wins on favorites and accurately reflects the economic outcome of a betting strategy.</p>
+                  <p style={{ marginTop: 10 }}><strong>Win percentage:</strong> Win % is shown as a secondary metric and is calculated as wins ÷ (wins + losses). Pushes are excluded from this denominator. Win percentage alone does <em>not</em> indicate profitability; a bettor can have a high win percentage and still lose money if most wins come at short odds. Always evaluate performance using units and ROI.</p>
+                  <p style={{ marginTop: 10 }}><strong>Sample size disclosure:</strong> Win rate and ROI figures are only displayed prominently once a strategy has accumulated <strong>20 or more settled picks</strong>. Below that threshold, we display a "building sample" notice to prevent misleading inferences from small sample sizes. Even after 20 settled picks, short-term variance can cause the displayed ROI to diverge significantly from the true long-run expectancy of a strategy. Sports betting results require hundreds or thousands of bets to reliably distinguish skill from luck.</p>
+                  <p style={{ marginTop: 10 }}><strong>No guarantee:</strong> Historical Track Record performance is shown for transparency and informational purposes only. <strong>Past performance does not guarantee future results.</strong> The Track Record reflects outcomes of picks generated by our algorithms using odds available at recommendation time; actual outcomes if you place the same wagers may differ due to line changes, book availability, limits, juice, bet sizing, and other factors. Nothing in the Track Record constitutes a prediction, guarantee, or recommendation to place any specific wager.</p>
 
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1a1d23", marginTop: 20, marginBottom: 8 }}>Assumption of Risk</h3>
                   <p>By using this Service, you acknowledge that you understand the risks of gambling, that gambling can be addictive, and that you are solely responsible for your own betting decisions and any financial consequences thereof. You agree that MyOddsy shall not be held liable for any losses, damages, or harm resulting from your use of the information provided on this Service.</p>

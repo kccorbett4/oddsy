@@ -2,6 +2,13 @@
 // Runs daily at 6 AM UTC via Vercel Cron.
 import { createClient } from "redis";
 
+// 1-unit flat stake. Win profit = decimal odds - 1. Loss = -1. Push = 0.
+function unitsOnWin(oddsStr) {
+  const odds = parseFloat(oddsStr);
+  if (!Number.isFinite(odds) || odds === 0) return 0;
+  return odds > 0 ? odds / 100 : 100 / Math.abs(odds);
+}
+
 export default async function handler(req, res) {
   let client;
   try {
@@ -129,23 +136,29 @@ export default async function handler(req, res) {
       }
 
       if (result) {
+        const unitProfit = result === "win" ? unitsOnWin(pick.odds)
+          : result === "loss" ? -1 : 0;
+
         await client.hSet(`pick:${pickId}`, {
           resolved: "true",
           result,
           finalHome: String(homeScore),
           finalAway: String(awayScore),
           resolvedAt: new Date().toISOString(),
+          unitProfit: unitProfit.toFixed(4),
         });
 
         // Update strategy stats
         const statsKey = `stats:${pick.strategy}`;
         await client.hIncrBy(statsKey, "total", 1);
         await client.hIncrBy(statsKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
+        await client.hIncrByFloat(statsKey, "units", unitProfit);
 
         // Update daily stats
         const dailyKey = `stats:${pick.strategy}:${pick.date}`;
         await client.hIncrBy(dailyKey, "total", 1);
         await client.hIncrBy(dailyKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
+        await client.hIncrByFloat(dailyKey, "units", unitProfit);
         await client.expire(dailyKey, 90 * 86400);
 
         await client.zRem("pending_picks", pickId);
