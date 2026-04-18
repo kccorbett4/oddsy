@@ -24,12 +24,10 @@ export default async function handler(req, res) {
 
     let scanned = 0;
     let resolved = 0;
-    let cursor = 0;
 
-    do {
-      const reply = await client.scan(cursor, { MATCH: "pick:*", COUNT: 500 });
-      cursor = Number(reply.cursor);
-      const keys = reply.keys || [];
+    // node-redis v5 scanIterator yields arrays of keys per batch
+    for await (const batch of client.scanIterator({ MATCH: "pick:*", COUNT: 500 })) {
+      const keys = Array.isArray(batch) ? batch : [batch];
       scanned += keys.length;
 
       for (const key of keys) {
@@ -51,7 +49,7 @@ export default async function handler(req, res) {
         }
         resolved += 1;
       }
-    } while (cursor !== 0);
+    }
 
     // Overwrite stats hashes
     for (const s of strategies) {
