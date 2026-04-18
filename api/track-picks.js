@@ -3,6 +3,12 @@
 // in the Track Record drill-down.
 import { createClient } from "redis";
 
+function unitsOnWin(oddsStr) {
+  const odds = parseFloat(oddsStr);
+  if (!Number.isFinite(odds) || odds === 0) return 0;
+  return odds > 0 ? odds / 100 : 100 / Math.abs(odds);
+}
+
 export default async function handler(req, res) {
   let client;
   try {
@@ -25,9 +31,19 @@ export default async function handler(req, res) {
         if (!p || p.resolved !== "true") continue;
         if (!["win", "loss", "push"].includes(p.result)) continue;
 
-        const unitProfit = p.unitProfit !== undefined && p.unitProfit !== ""
-          ? parseFloat(p.unitProfit)
-          : p.result === "loss" ? -1 : 0;
+        // Prefer stored unitProfit; fall back to computing from odds
+        // so picks resolved before unitProfit tracking was added still
+        // show correct units in the UI.
+        let unitProfit;
+        if (p.unitProfit !== undefined && p.unitProfit !== "") {
+          unitProfit = parseFloat(p.unitProfit);
+        } else if (p.result === "win") {
+          unitProfit = unitsOnWin(p.odds);
+        } else if (p.result === "loss") {
+          unitProfit = -1;
+        } else {
+          unitProfit = 0;
+        }
 
         picks.push({
           id: key.slice(5), // strip "pick:" prefix
