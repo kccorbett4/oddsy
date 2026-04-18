@@ -747,7 +747,7 @@ const StatCard = ({ label, value, sub, color }) => (
   </div>
 );
 
-const SAMPLE_THRESHOLD = 20;
+const SAMPLE_THRESHOLD = 5;
 
 const PerformanceBanner = ({ stats, label }) => {
   if (!stats || stats.total === 0) return null;
@@ -1097,6 +1097,9 @@ export default function App() {
   const [narrativePlays, setNarrativePlays] = useState([]);
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [strategyStats, setStrategyStats] = useState({});
+  const [resolvedPicks, setResolvedPicks] = useState([]);
+  const [recordPeriod, setRecordPeriod] = useState("all"); // "7" | "30" | "all"
+  const [selectedStrategy, setSelectedStrategy] = useState(null);
   const picksSentRef = useRef(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
   const [geoLoaded, setGeoLoaded] = useState(false);
@@ -1237,6 +1240,19 @@ export default function App() {
       .then(data => { if (data?.stats) setStrategyStats(data.stats); })
       .catch(() => {});
   }, []);
+
+  // Fetch individual resolved picks — powers the Record tab drill-down
+  // and period filtering. Only loaded once when the Record tab is first
+  // opened to avoid scanning all pick:* keys on every page load.
+  const picksLoadedRef = useRef(false);
+  useEffect(() => {
+    if (activeTab !== "record" || picksLoadedRef.current) return;
+    picksLoadedRef.current = true;
+    fetch("/api/track-picks")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.picks) setResolvedPicks(data.picks); })
+      .catch(() => {});
+  }, [activeTab]);
 
   // POST picks to tracking API when data is ready (once per session)
   useEffect(() => {
@@ -2427,17 +2443,222 @@ export default function App() {
             { id: "narrative", label: "Narrative Regression", color: "#d97706", icon: "📉",
               desc: "Fade the overreaction after a blowout loss." },
           ];
-          const totalWins = Object.values(strategyStats).reduce((sum, s) => sum + (s?.wins || 0), 0);
-          const totalLosses = Object.values(strategyStats).reduce((sum, s) => sum + (s?.losses || 0), 0);
-          const totalPushes = Object.values(strategyStats).reduce((sum, s) => sum + (s?.pushes || 0), 0);
-          const totalSettledR = Object.values(strategyStats).reduce((sum, s) => sum + (s?.total || 0), 0);
-          const totalUnitsR = Object.values(strategyStats).reduce((sum, s) => sum + (typeof s?.units === "number" ? s.units : parseFloat(s?.units || 0)), 0);
-          const totalDecided = totalWins + totalLosses;
-          const overallPct = totalDecided > 0 ? ((totalWins / totalDecided) * 100).toFixed(1) : null;
-          const overallRoiR = totalSettledR > 0 ? (totalUnitsR / totalSettledR) * 100 : null;
-          const overallColor = overallRoiR === null ? "#8b919a"
-            : overallRoiR >= 5 ? "#0d9f4f" : overallRoiR >= 0 ? "#1a73e8" : "#e8a100";
 
+          // Filter picks by selected period
+          const now = Date.now();
+          const periodMs = recordPeriod === "7" ? 7 * 86400000
+            : recordPeriod === "30" ? 30 * 86400000
+            : null;
+          const periodLabel = recordPeriod === "7" ? "Last 7 Days"
+            : recordPeriod === "30" ? "Last 30 Days"
+            : "All Time";
+          const filteredPicks = (resolvedPicks || []).filter(p => {
+            if (periodMs === null) return true;
+            const t = new Date(p.commenceTime || p.resolvedAt || 0).getTime();
+            return now - t <= periodMs;
+          });
+
+          // Compute per-strategy aggregates from filtered picks
+          const computeStats = (picks) => {
+            let wins = 0, losses = 0, pushes = 0, units = 0;
+            for (const p of picks) {
+              if (p.result === "win") { wins++; units += (typeof p.unitProfit === "number" ? p.unitProfit : 0); }
+              else if (p.result === "loss") { losses++; units -= 1; }
+              else if (p.result === "push") { pushes++; }
+            }
+            const total = wins + losses + pushes;
+            const decided = wins + losses;
+            const roi = total > 0 ? (units / total) * 100 : null;
+            const winPct = decided > 0 ? ((wins / decided) * 100) : null;
+            return { wins, losses, pushes, total, decided, units, roi, winPct };
+          };
+
+          const overall = computeStats(filteredPicks);
+          const overallColor = overall.roi === null ? "#8b919a"
+            : overall.roi >= 5 ? "#0d9f4f" : overall.roi >= 0 ? "#1a73e8" : "#e8a100";
+
+          // Earliest pick date — used for "since [date]" display on All Time
+          const oldestTs = filteredPicks.length > 0
+            ? filteredPicks.reduce((min, p) => {
+                const t = new Date(p.commenceTime || p.resolvedAt || 0).getTime();
+                return t && t < min ? t : min;
+              }, Infinity)
+            : null;
+          const sinceLabel = (recordPeriod === "all" && oldestTs && oldestTs !== Infinity)
+            ? new Date(oldestTs).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+            : null;
+
+          // ─── DRILL-DOWN DETAIL VIEW ───
+          if (selectedStrategy) {
+            const meta = rows.find(r => r.id === selectedStrategy);
+            const stratPicks = filteredPicks.filter(p => p.strategy === selectedStrategy);
+            const stratStats = computeStats(stratPicks);
+            const stratColor = stratStats.roi === null ? "#8b919a"
+              : stratStats.roi >= 5 ? "#0d9f4f" : stratStats.roi >= 0 ? "#1a73e8" : "#e8a100";
+
+            // Cumulative equity curve (last-N picks visualization as simple bars)
+            let running = 0;
+            const curve = stratPicks.slice().reverse().map(p => {
+              const profit = p.result === "win" ? (p.unitProfit || 0)
+                : p.result === "loss" ? -1 : 0;
+              running += profit;
+              return { pick: p, cum: running, profit };
+            });
+            const curveMin = curve.length > 0 ? Math.min(0, ...curve.map(c => c.cum)) : 0;
+            const curveMax = curve.length > 0 ? Math.max(0, ...curve.map(c => c.cum)) : 0;
+            const curveRange = Math.max(1, curveMax - curveMin);
+
+            return (
+              <>
+                <button onClick={() => setSelectedStrategy(null)} style={{
+                  background: "none", border: "none", color: "#1a73e8", fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", padding: "4px 0", marginBottom: 10, fontFamily: "'DM Sans', sans-serif",
+                }}>← Back to Track Record</button>
+
+                <div style={{ marginBottom: 10 }}>
+                  <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#1a1d23" }}>
+                    {meta?.icon} {meta?.label}
+                  </h2>
+                  <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                    {meta?.desc}
+                  </div>
+                </div>
+
+                {/* Period toggle */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                  {[
+                    { id: "7", label: "7D" },
+                    { id: "30", label: "30D" },
+                    { id: "all", label: "All Time" },
+                  ].map(p => (
+                    <button key={p.id} onClick={() => setRecordPeriod(p.id)} style={{
+                      padding: "6px 14px", borderRadius: 8,
+                      border: recordPeriod === p.id ? "1.5px solid #1a73e8" : "1px solid #e2e5ea",
+                      background: recordPeriod === p.id ? "#1a73e814" : "#fff",
+                      color: recordPeriod === p.id ? "#1a73e8" : "#5f6368",
+                      fontSize: 12, fontWeight: 700, cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}>{p.label}</button>
+                  ))}
+                </div>
+
+                {/* Strategy hero */}
+                <div style={{
+                  background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
+                  borderRadius: 16, padding: "20px 22px", marginBottom: 18, color: "#fff",
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#a0aec0", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 8 }}>
+                    {periodLabel}{sinceLabel ? ` · since ${sinceLabel}` : ""}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 44, fontWeight: 900, color: stratColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
+                      {stratStats.units >= 0 ? "+" : ""}{stratStats.units.toFixed(2)}u
+                    </div>
+                    <div style={{ fontSize: 13, color: "#cbd5e0" }}>
+                      {stratStats.roi === null ? "—" : `${stratStats.roi >= 0 ? "+" : ""}${stratStats.roi.toFixed(1)}% ROI`}
+                      <div style={{ fontSize: 11, color: "#8b919a", marginTop: 2 }}>
+                        {stratStats.wins}W · {stratStats.losses}L{stratStats.pushes > 0 ? ` · ${stratStats.pushes}P` : ""} ({stratStats.winPct === null ? "—" : `${stratStats.winPct.toFixed(1)}% win`}) · {stratStats.total} settled
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Equity curve */}
+                {curve.length > 1 && (
+                  <div style={{
+                    background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
+                    padding: "14px 16px", marginBottom: 14,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>
+                      Running Units
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 60 }}>
+                      {curve.map((c, i) => {
+                        const h = ((c.cum - curveMin) / curveRange) * 100;
+                        const color = c.profit > 0 ? "#0d9f4f" : c.profit < 0 ? "#e8a100" : "#8b919a";
+                        return (
+                          <div key={i} style={{
+                            flex: 1, minWidth: 2, height: `${Math.max(2, h)}%`,
+                            background: color, borderRadius: 1, transition: "height 0.3s",
+                          }} title={`${c.pick.outcome} · ${c.cum.toFixed(2)}u`} />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pick list */}
+                <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>
+                  Picks ({stratPicks.length})
+                </h3>
+                {stratPicks.length === 0 ? (
+                  <div style={{
+                    background: "#f8f9fa", border: "1px dashed #cbd5e0", borderRadius: 12,
+                    padding: "20px 16px", textAlign: "center", color: "#8b919a", fontSize: 12,
+                  }}>
+                    No settled picks in this period yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {stratPicks.map(p => {
+                      const profit = p.result === "win" ? (p.unitProfit || 0)
+                        : p.result === "loss" ? -1 : 0;
+                      const resultColor = p.result === "win" ? "#0d9f4f"
+                        : p.result === "loss" ? "#dc2626" : "#8b919a";
+                      const resultLabel = p.result.toUpperCase();
+                      const marketLabel = p.marketType === "h2h" ? "ML"
+                        : p.marketType === "spreads" ? "Spread" : "Total";
+                      const pointStr = p.point !== null && p.point !== undefined
+                        ? (p.point > 0 ? `+${p.point}` : `${p.point}`)
+                        : "";
+                      const dateStr = p.commenceTime
+                        ? new Date(p.commenceTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                        : "";
+                      return (
+                        <div key={p.id} style={{
+                          background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${resultColor}`,
+                          borderRadius: 10, padding: "10px 12px",
+                          display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
+                        }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+                              <span style={{
+                                fontSize: 9, fontWeight: 800, color: resultColor,
+                                background: `${resultColor}12`, padding: "2px 6px", borderRadius: 4,
+                                letterSpacing: "0.04em",
+                              }}>{resultLabel}</span>
+                              <span style={{ fontSize: 10, color: "#8b919a", fontWeight: 600 }}>{dateStr}</span>
+                              <span style={{ fontSize: 10, color: "#8b919a" }}>{marketLabel}</span>
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1d23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {p.outcome} {pointStr}
+                            </div>
+                            <div style={{ fontSize: 10, color: "#8b919a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {p.awayTeam} @ {p.homeTeam}
+                              {p.finalHome !== null && p.finalAway !== null ? ` · ${p.finalAway}-${p.finalHome}` : ""}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{
+                              fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace",
+                              color: profit >= 0 ? "#0d9f4f" : "#dc2626",
+                            }}>
+                              {profit >= 0 ? "+" : ""}{profit.toFixed(2)}u
+                            </div>
+                            <div style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
+                              {p.odds} · {p.book}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            );
+          }
+
+          // ─── OVERVIEW VIEW ───
           return (
             <>
               <div style={{ marginBottom: 14 }}>
@@ -2445,8 +2666,26 @@ export default function App() {
                   Track Record
                 </h2>
                 <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-                  Every pick we recommend gets saved and settled against real game results. No cherry-picking. No hiding losses.
+                  Every pick we recommend gets saved and settled against real game results. No cherry-picking. No hiding losses. Tap a strategy for the full pick history.
                 </div>
+              </div>
+
+              {/* Period toggle */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                {[
+                  { id: "7", label: "7D" },
+                  { id: "30", label: "30D" },
+                  { id: "all", label: "All Time" },
+                ].map(p => (
+                  <button key={p.id} onClick={() => setRecordPeriod(p.id)} style={{
+                    padding: "6px 14px", borderRadius: 8,
+                    border: recordPeriod === p.id ? "1.5px solid #1a73e8" : "1px solid #e2e5ea",
+                    background: recordPeriod === p.id ? "#1a73e814" : "#fff",
+                    color: recordPeriod === p.id ? "#1a73e8" : "#5f6368",
+                    fontSize: 12, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>{p.label}</button>
+                ))}
               </div>
 
               {/* Overall hero */}
@@ -2455,26 +2694,26 @@ export default function App() {
                 borderRadius: 16, padding: "20px 22px", marginBottom: 18, color: "#fff",
               }}>
                 <div style={{ fontSize: 10, fontWeight: 800, color: "#a0aec0", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 8 }}>
-                  Overall Performance
+                  Overall · {periodLabel}{sinceLabel ? ` · since ${sinceLabel}` : ""}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 44, fontWeight: 900, color: overallColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
-                    {totalUnitsR >= 0 ? "+" : ""}{totalUnitsR.toFixed(2)}u
+                    {overall.units >= 0 ? "+" : ""}{overall.units.toFixed(2)}u
                   </div>
                   <div style={{ fontSize: 13, color: "#cbd5e0" }}>
-                    {overallRoiR === null ? "—" : `${overallRoiR >= 0 ? "+" : ""}${overallRoiR.toFixed(1)}% ROI`}
+                    {overall.roi === null ? "—" : `${overall.roi >= 0 ? "+" : ""}${overall.roi.toFixed(1)}% ROI`}
                     <div style={{ fontSize: 11, color: "#8b919a", marginTop: 2 }}>
-                      {totalWins}W · {totalLosses}L{totalPushes > 0 ? ` · ${totalPushes}P` : ""} ({overallPct !== null ? `${overallPct}% win` : "—"}) · {totalSettledR} settled
+                      {overall.wins}W · {overall.losses}L{overall.pushes > 0 ? ` · ${overall.pushes}P` : ""} ({overall.winPct === null ? "—" : `${overall.winPct.toFixed(1)}% win`}) · {overall.total} settled
                     </div>
                   </div>
                 </div>
-                {totalDecided < SAMPLE_THRESHOLD && (
+                {overall.decided < SAMPLE_THRESHOLD && (
                   <div style={{
                     marginTop: 12, padding: "8px 12px", borderRadius: 8,
                     background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)",
                     fontSize: 11, color: "#fbd38d", lineHeight: 1.5,
                   }}>
-                    Sample too small to draw conclusions. ROI becomes meaningful after 20+ settled picks per strategy.
+                    Sample too small to draw conclusions. ROI becomes meaningful after 5+ settled picks per strategy, though hundreds of picks are needed to distinguish skill from variance.
                   </div>
                 )}
               </div>
@@ -2483,20 +2722,24 @@ export default function App() {
               <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>By Strategy</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
                 {rows.map(r => {
-                  const s = strategyStats[r.id] || { wins: 0, losses: 0, pushes: 0, total: 0, units: 0, roi: null, winPct: null };
-                  const decided = (s.wins || 0) + (s.losses || 0);
-                  const hasEnough = decided >= SAMPLE_THRESHOLD;
-                  const units = typeof s.units === "number" ? s.units : parseFloat(s.units || 0);
-                  const roi = s.roi === null || s.roi === undefined ? null : parseFloat(s.roi);
-                  const showRoi = hasEnough ? roi : null;
+                  const stratPicks = filteredPicks.filter(p => p.strategy === r.id);
+                  const s = computeStats(stratPicks);
+                  const hasEnough = s.decided >= SAMPLE_THRESHOLD;
+                  const showRoi = hasEnough ? s.roi : null;
                   const roiColor = showRoi === null ? "#8b919a"
                     : showRoi >= 5 ? "#0d9f4f" : showRoi >= 0 ? "#1a73e8" : "#e8a100";
 
                   return (
-                    <div key={r.id} style={{
-                      background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${r.color}`,
-                      borderRadius: 12, padding: "14px 16px",
-                    }}>
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedStrategy(r.id)}
+                      style={{
+                        background: "#fff", border: "1px solid #e2e5ea", borderLeft: `3px solid ${r.color}`,
+                        borderRadius: 12, padding: "14px 16px",
+                        textAlign: "left", cursor: "pointer", width: "100%",
+                        fontFamily: "inherit",
+                      }}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1d23" }}>
@@ -2506,17 +2749,20 @@ export default function App() {
                             {r.desc}
                           </div>
                         </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{
-                            fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace",
-                            color: roiColor, lineHeight: 1,
-                          }}>
-                            {hasEnough ? `${units >= 0 ? "+" : ""}${units.toFixed(2)}u` : "—"}
+                        <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                          <div>
+                            <div style={{
+                              fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace",
+                              color: roiColor, lineHeight: 1,
+                            }}>
+                              {hasEnough ? `${s.units >= 0 ? "+" : ""}${s.units.toFixed(2)}u` : "—"}
+                            </div>
+                            <div style={{ fontSize: 10, color: "#8b919a", marginTop: 3 }}>
+                              {showRoi === null ? "" : `${showRoi >= 0 ? "+" : ""}${showRoi.toFixed(1)}% ROI · `}{s.wins}W-{s.losses}L{s.pushes > 0 ? `-${s.pushes}P` : ""}
+                              {hasEnough && s.winPct !== null ? ` (${s.winPct.toFixed(1)}% win)` : ""}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 10, color: "#8b919a", marginTop: 3 }}>
-                            {showRoi === null ? "" : `${showRoi >= 0 ? "+" : ""}${showRoi.toFixed(1)}% ROI · `}{s.wins}W-{s.losses}L{s.pushes > 0 ? `-${s.pushes}P` : ""}
-                            {hasEnough && s.winPct ? ` (${s.winPct}% win)` : ""}
-                          </div>
+                          <div style={{ fontSize: 16, color: "#cbd5e0", fontWeight: 700 }}>›</div>
                         </div>
                       </div>
                       {!hasEnough && (
@@ -2524,10 +2770,12 @@ export default function App() {
                           marginTop: 10, fontSize: 10, color: "#8b919a",
                           background: "#f8f9fa", padding: "6px 10px", borderRadius: 6,
                         }}>
-                          Building sample — {SAMPLE_THRESHOLD - decided} more settled picks until ROI is confident.
+                          {s.total === 0
+                            ? `No settled picks yet${recordPeriod !== "all" ? ` in ${periodLabel.toLowerCase()}` : ""}.`
+                            : `Building sample — ${SAMPLE_THRESHOLD - s.decided} more settled picks until ROI is confident.`}
                         </div>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -2760,7 +3008,7 @@ export default function App() {
                   </ul>
                   <p style={{ marginTop: 10 }}><strong>ROI calculation:</strong> ROI = (total units won ÷ total settled picks) × 100, expressed as a percentage. A positive ROI indicates profit per unit wagered. A negative ROI indicates loss per unit wagered. ROI is the industry-standard metric because, unlike raw win percentage, it correctly weights wins on underdogs heavier than wins on favorites and accurately reflects the economic outcome of a betting strategy.</p>
                   <p style={{ marginTop: 10 }}><strong>Win percentage:</strong> Win % is shown as a secondary metric and is calculated as wins ÷ (wins + losses). Pushes are excluded from this denominator. Win percentage alone does <em>not</em> indicate profitability; a bettor can have a high win percentage and still lose money if most wins come at short odds. Always evaluate performance using units and ROI.</p>
-                  <p style={{ marginTop: 10 }}><strong>Sample size disclosure:</strong> Win rate and ROI figures are only displayed prominently once a strategy has accumulated <strong>20 or more settled picks</strong>. Below that threshold, we display a "building sample" notice to prevent misleading inferences from small sample sizes. Even after 20 settled picks, short-term variance can cause the displayed ROI to diverge significantly from the true long-run expectancy of a strategy. Sports betting results require hundreds or thousands of bets to reliably distinguish skill from luck.</p>
+                  <p style={{ marginTop: 10 }}><strong>Sample size disclosure:</strong> Win rate and ROI figures are only displayed prominently once a strategy has accumulated <strong>5 or more settled picks</strong>. Below that threshold, we display a "building sample" notice. Even at 5 settled picks the figures are highly volatile; short-term variance can cause the displayed ROI to diverge significantly from the true long-run expectancy of a strategy, and sports betting results require hundreds or thousands of bets to reliably distinguish skill from luck. Treat early numbers as directional indicators only, never as statistically significant evidence of edge.</p>
                   <p style={{ marginTop: 10 }}><strong>No guarantee:</strong> Historical Track Record performance is shown for transparency and informational purposes only. <strong>Past performance does not guarantee future results.</strong> The Track Record reflects outcomes of picks generated by our algorithms using odds available at recommendation time; actual outcomes if you place the same wagers may differ due to line changes, book availability, limits, juice, bet sizing, and other factors. Nothing in the Track Record constitutes a prediction, guarantee, or recommendation to place any specific wager.</p>
 
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1a1d23", marginTop: 20, marginBottom: 8 }}>Assumption of Risk</h3>
