@@ -1322,6 +1322,14 @@ export default function App() {
       .catch(() => {});
   }, [activeTab]);
 
+  // Collapse the drill-down when the user leaves the Record tab so they
+  // land on the strategy list, not a stale sub-view, when they come back.
+  useEffect(() => {
+    if (activeTab !== "record" && selectedStrategy !== null) {
+      setSelectedStrategy(null);
+    }
+  }, [activeTab, selectedStrategy]);
+
   // POST picks to tracking API when data is ready (once per session)
   useEffect(() => {
     if (picksSentRef.current) return;

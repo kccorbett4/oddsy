@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   let client;
   try {
     if (!process.env.REDIS_URL) {
-      return res.status(500).json({ error: "REDIS_URL not configured" });
+      return res.status(200).json({ scanned: 0, resolved: 0, stats: {}, note: "REDIS_URL not configured" });
     }
 
     client = createClient({ url: process.env.REDIS_URL });
