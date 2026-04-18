@@ -1,5 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { evaluateStrategy } from "./StrategyBuilder.jsx";
+
+// Custom-strategy storage keys (mirrored here so we can read without importing state)
+const CUSTOM_STRATEGIES_KEY = "oddsy_strategies";
+const loadCustomStrategies = () => {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(CUSTOM_STRATEGIES_KEY) : null;
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+};
 
 // ─── Tab ↔ URL mapping ────────────────────────────────
 // Keeps the browser back/forward buttons and shareable links working.
@@ -1192,9 +1206,20 @@ export default function App() {
   const routeParams = useParams();
   const activeTab = tabFromPath(location.pathname);
   const setActiveTab = (tab) => navigate(TAB_PATHS[tab] || "/");
-  const [pickFilter, setPickFilter] = useState("all"); // all|sharp|value|stale|rlm|narrative
+
+  // URL-driven sub-views so the browser back button works between filters.
+  const PICK_FILTERS = new Set(["all", "sharp", "value", "stale", "rlm", "narrative"]);
+  const GAMES_SUBS = new Set(["odds", "scores"]);
+  const pickFilter = activeTab === "picks"
+    ? (PICK_FILTERS.has(routeParams.filter) ? routeParams.filter : "all")
+    : "all";
+  const setPickFilter = (f) => navigate(f === "all" ? "/picks" : `/picks/${f}`);
+  const gamesSub = activeTab === "games"
+    ? (GAMES_SUBS.has(routeParams.sub) ? routeParams.sub : "odds")
+    : "odds";
+  const setGamesSub = (s) => navigate(s === "odds" ? "/games" : `/games/${s}`);
+
   const [parlaySub, setParlaySub] = useState("safe"); // safe|correlated
-  const [gamesSub, setGamesSub] = useState("odds"); // odds|scores
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);

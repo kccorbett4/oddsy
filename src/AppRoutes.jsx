@@ -18,8 +18,10 @@ export default function AppRoutes() {
       {/* Main app — tab state is driven by the URL */}
       <Route path="/" element={<App />} />
       <Route path="/picks" element={<App />} />
+      <Route path="/picks/:filter" element={<App />} />
       <Route path="/parlays" element={<App />} />
       <Route path="/games" element={<App />} />
+      <Route path="/games/:sub" element={<App />} />
       <Route path="/record" element={<App />} />
       <Route path="/record/:strategy" element={<App />} />
 
