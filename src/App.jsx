@@ -749,6 +749,71 @@ const StatCard = ({ label, value, sub, color }) => (
 
 const SAMPLE_THRESHOLD = 1;
 
+// Click-to-reveal tooltip that explains what units mean and translates
+// the current unit total into concrete dollar amounts at common bet sizes.
+// Works on both desktop (hover) and mobile (tap).
+const UnitsInfo = ({ units, dark = false }) => {
+  const [open, setOpen] = useState(false);
+  const u = typeof units === "number" ? units : parseFloat(units || 0);
+  const fmt = (n) => {
+    const s = n.toFixed(2);
+    const [whole, dec] = s.split(".");
+    return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + dec;
+  };
+  const sign = u >= 0 ? "+" : "-";
+  const abs = Math.abs(u);
+  const iconColor = dark ? "#a0aec0" : "#8b919a";
+  const bg = dark ? "#fff" : "#fff";
+  const fg = "#1a1d23";
+
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        aria-label="What does 'u' mean?"
+        style={{
+          width: 18, height: 18, borderRadius: "50%",
+          border: `1px solid ${iconColor}`, background: "transparent",
+          color: iconColor, fontSize: 11, fontWeight: 800,
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", marginLeft: 6, padding: 0, lineHeight: 1,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >i</button>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0,
+            background: bg, color: fg,
+            border: "1px solid #e2e5ea", borderRadius: 10,
+            padding: "12px 14px", width: 260, zIndex: 50,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+            fontFamily: "'DM Sans', sans-serif", textAlign: "left",
+            fontWeight: 400,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: fg }}>What's a unit (u)?</div>
+          <div style={{ fontSize: 11, color: "#4a5568", lineHeight: 1.5, marginBottom: 8 }}>
+            A unit is the size of one flat bet. +200 odds pays +2.00u on a win; -150 pays +0.67u; a loss is -1.00u.
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: fg, marginBottom: 6 }}>
+            If you'd bet a flat stake on every pick:
+          </div>
+          <div style={{ fontSize: 11, color: "#4a5568", lineHeight: 1.7 }}>
+            <div>$10/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 10)}</strong></div>
+            <div>$100/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 100)}</strong></div>
+            <div>$1,000/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 1000)}</strong></div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+};
+
 const PerformanceBanner = ({ stats, label }) => {
   if (!stats || stats.total === 0) return null;
   const decided = (stats.wins || 0) + (stats.losses || 0);
@@ -803,10 +868,13 @@ const PerformanceBanner = ({ stats, label }) => {
       gap: 8,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{
-          fontSize: 20, fontWeight: 900, color,
-          fontFamily: "'Space Mono', monospace",
-        }}>{unitsStr}</div>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{
+            fontSize: 20, fontWeight: 900, color,
+            fontFamily: "'Space Mono', monospace",
+          }}>{unitsStr}</div>
+          <UnitsInfo units={units} />
+        </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>{label} · {roiStr} ROI</div>
           <div style={{ fontSize: 10, color: "#8b919a" }}>
@@ -2551,8 +2619,11 @@ export default function App() {
                     {periodLabel}{sinceLabel ? ` · since ${sinceLabel}` : ""}
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 44, fontWeight: 900, color: stratColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
-                      {stratStats.units >= 0 ? "+" : ""}{stratStats.units.toFixed(2)}u
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <div style={{ fontSize: 44, fontWeight: 900, color: stratColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
+                        {stratStats.units >= 0 ? "+" : ""}{stratStats.units.toFixed(2)}u
+                      </div>
+                      <UnitsInfo units={stratStats.units} dark />
                     </div>
                     <div style={{ fontSize: 13, color: "#cbd5e0" }}>
                       {stratStats.roi === null ? "—" : `${stratStats.roi >= 0 ? "+" : ""}${stratStats.roi.toFixed(1)}% ROI`}
@@ -2697,8 +2768,11 @@ export default function App() {
                   Overall · {periodLabel}{sinceLabel ? ` · since ${sinceLabel}` : ""}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 44, fontWeight: 900, color: overallColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
-                    {overall.units >= 0 ? "+" : ""}{overall.units.toFixed(2)}u
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <div style={{ fontSize: 44, fontWeight: 900, color: overallColor, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>
+                      {overall.units >= 0 ? "+" : ""}{overall.units.toFixed(2)}u
+                    </div>
+                    <UnitsInfo units={overall.units} dark />
                   </div>
                   <div style={{ fontSize: 13, color: "#cbd5e0" }}>
                     {overall.roi === null ? "—" : `${overall.roi >= 0 ? "+" : ""}${overall.roi.toFixed(1)}% ROI`}
