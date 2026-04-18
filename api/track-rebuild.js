@@ -18,9 +18,12 @@ export default async function handler(req, res) {
     client = createClient({ url: process.env.REDIS_URL });
     await client.connect();
 
-    const strategies = ["sharp", "value", "stale", "rlm", "correlated", "narrative"];
     const agg = {};
-    strategies.forEach(s => { agg[s] = { wins: 0, losses: 0, pushes: 0, total: 0, units: 0 }; });
+    const rawCounts = {}; // { strategy: { pending, resolved, expired, other } }
+    const ensure = (s) => {
+      if (!agg[s]) agg[s] = { wins: 0, losses: 0, pushes: 0, total: 0, units: 0 };
+      if (!rawCounts[s]) rawCounts[s] = { pending: 0, resolved: 0, expired: 0, other: 0 };
+    };
 
     let scanned = 0;
     let resolved = 0;
@@ -32,24 +35,36 @@ export default async function handler(req, res) {
 
       for (const key of keys) {
         const pick = await client.hGetAll(key);
-        if (!pick || pick.resolved !== "true") continue;
+        if (!pick || !pick.strategy) continue;
         const strat = pick.strategy;
-        if (!agg[strat]) continue;
-        if (!["win", "loss", "push"].includes(pick.result)) continue;
+        ensure(strat);
 
-        agg[strat].total += 1;
-        if (pick.result === "win") {
-          agg[strat].wins += 1;
-          agg[strat].units += unitsOnWin(pick.odds);
-        } else if (pick.result === "loss") {
-          agg[strat].losses += 1;
-          agg[strat].units -= 1;
+        // Track raw lifecycle counts so we can see if a strategy's picks
+        // are being saved but never resolving (e.g., team-match failures).
+        if (pick.resolved !== "true") {
+          rawCounts[strat].pending += 1;
+        } else if (pick.result === "expired") {
+          rawCounts[strat].expired += 1;
+        } else if (["win", "loss", "push"].includes(pick.result)) {
+          rawCounts[strat].resolved += 1;
+          agg[strat].total += 1;
+          if (pick.result === "win") {
+            agg[strat].wins += 1;
+            agg[strat].units += unitsOnWin(pick.odds);
+          } else if (pick.result === "loss") {
+            agg[strat].losses += 1;
+            agg[strat].units -= 1;
+          } else {
+            agg[strat].pushes += 1;
+          }
+          resolved += 1;
         } else {
-          agg[strat].pushes += 1;
+          rawCounts[strat].other += 1;
         }
-        resolved += 1;
       }
     }
+
+    const strategies = Object.keys(agg);
 
     // Overwrite stats hashes
     for (const s of strategies) {

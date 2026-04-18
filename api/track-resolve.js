@@ -9,6 +9,60 @@ function unitsOnWin(oddsStr) {
   return odds > 0 ? odds / 100 : 100 / Math.abs(odds);
 }
 
+// Normalize team names for matching across sources (ESPN vs The Odds API).
+const normalizeTeam = (s) =>
+  (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+// Known abbreviation → canonical mappings. Extend as source divergences surface.
+const TEAM_ALIASES = {
+  "la lakers": "los angeles lakers",
+  "la clippers": "los angeles clippers",
+  "ny yankees": "new york yankees",
+  "ny mets": "new york mets",
+  "ny giants": "new york giants",
+  "ny jets": "new york jets",
+  "sf giants": "san francisco giants",
+  "sf 49ers": "san francisco 49ers",
+};
+
+const canonicalTeam = (s) => {
+  const n = normalizeTeam(s);
+  return TEAM_ALIASES[n] || n;
+};
+
+// Match two team names safely. Requires either an exact canonical match, or
+// every token of the shorter name to appear as a whole token in the longer
+// (and shorter must have ≥2 tokens). This avoids the classic "Michigan"
+// substring-matching "Michigan State" bug.
+const teamsMatch = (a, b) => {
+  const ca = canonicalTeam(a);
+  const cb = canonicalTeam(b);
+  if (!ca || !cb) return false;
+  if (ca === cb) return true;
+  const ta = ca.split(" ").filter(Boolean);
+  const tb = cb.split(" ").filter(Boolean);
+  if (!ta.length || !tb.length) return false;
+  const [shorter, longer] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  if (shorter.length < 2) return false;
+  return shorter.every((t) => longer.includes(t));
+};
+
+// Pick side: returns true if `outcome` refers to the home team.
+const outcomeIsHome = (outcomeName, homeTeam, awayTeam) => {
+  if (teamsMatch(outcomeName, homeTeam)) return true;
+  if (teamsMatch(outcomeName, awayTeam)) return false;
+  // Fall back to a looser canonical check so we don't silently mislabel picks.
+  const co = canonicalTeam(outcomeName);
+  const ch = canonicalTeam(homeTeam);
+  const ca = canonicalTeam(awayTeam);
+  if (co === ch) return true;
+  if (co === ca) return false;
+  // Last resort: prefer whichever canonical team name the outcome starts with.
+  if (co && ch && co.startsWith(ch)) return true;
+  if (co && ca && co.startsWith(ca)) return false;
+  return null; // unresolved
+};
+
 export default async function handler(req, res) {
   let client;
   try {
@@ -80,13 +134,9 @@ export default async function handler(req, res) {
       }
 
       // Try to match the game to a final score
-      const matchedScore = allScores.find(s => {
-        const homeMatch = s.home.name?.toLowerCase().includes(pick.homeTeam?.toLowerCase()) ||
-                         pick.homeTeam?.toLowerCase().includes(s.home.name?.toLowerCase());
-        const awayMatch = s.away.name?.toLowerCase().includes(pick.awayTeam?.toLowerCase()) ||
-                         pick.awayTeam?.toLowerCase().includes(s.away.name?.toLowerCase());
-        return homeMatch && awayMatch;
-      });
+      const matchedScore = allScores.find(
+        (s) => teamsMatch(s.home.name, pick.homeTeam) && teamsMatch(s.away.name, pick.awayTeam)
+      );
 
       if (!matchedScore) {
         // Remove if the game is more than 48 hours old
@@ -106,16 +156,16 @@ export default async function handler(req, res) {
       const point = pick.point !== "" ? parseFloat(pick.point) : null;
 
       if (pick.marketType === "h2h") {
-        const pickedHome = pick.outcome.toLowerCase().includes(pick.homeTeam?.toLowerCase()) ||
-                          pick.homeTeam?.toLowerCase().includes(pick.outcome?.toLowerCase());
+        const pickedHome = outcomeIsHome(pick.outcome, pick.homeTeam, pick.awayTeam);
+        if (pickedHome === null) continue; // can't safely attribute — skip
         if (pickedHome) {
           result = homeScore > awayScore ? "win" : homeScore === awayScore ? "push" : "loss";
         } else {
           result = awayScore > homeScore ? "win" : homeScore === awayScore ? "push" : "loss";
         }
       } else if (pick.marketType === "spreads" && point !== null) {
-        const pickedHome = pick.outcome.toLowerCase().includes(pick.homeTeam?.toLowerCase()) ||
-                          pick.homeTeam?.toLowerCase().includes(pick.outcome?.toLowerCase());
+        const pickedHome = outcomeIsHome(pick.outcome, pick.homeTeam, pick.awayTeam);
+        if (pickedHome === null) continue;
         let adjustedScore;
         if (pickedHome) {
           adjustedScore = homeScore + point;

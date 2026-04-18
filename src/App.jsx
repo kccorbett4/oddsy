@@ -1,5 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+
+// ─── Tab ↔ URL mapping ────────────────────────────────
+// Keeps the browser back/forward buttons and shareable links working.
+const TAB_PATHS = { home: "/", picks: "/picks", parlays: "/parlays", games: "/games", record: "/record" };
+function tabFromPath(pathname) {
+  if (pathname === "/" || pathname === "") return "home";
+  if (pathname.startsWith("/picks")) return "picks";
+  if (pathname.startsWith("/parlays")) return "parlays";
+  if (pathname.startsWith("/games")) return "games";
+  if (pathname.startsWith("/record")) return "record";
+  return "home";
+}
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈", season: true },
@@ -34,6 +46,43 @@ const impliedProb = (odds) => {
 const calcEV = (odds, estimatedProb) => {
   const payout = odds > 0 ? odds / 100 : 100 / Math.abs(odds);
   return (estimatedProb * payout - (1 - estimatedProb)) * 100;
+};
+
+// Median of a numeric array (even-length: average of middle two)
+const median = (arr) => {
+  if (!arr || !arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+
+// Vig-removed fair probabilities for a 2-way market, per book.
+// Returns { perOutcomeFair: {key: [fairProbs...]}, perOutcomeOffers: {key: [{price, book, point, name}...]} }
+// where each book's two outcomes are normalized so fair1 + fair2 = 1.
+const collectMarketFairProbs = (game, marketType) => {
+  const perOutcomeFair = {};
+  const perOutcomeOffers = {};
+
+  game.bookmakers.forEach(book => {
+    const market = book.markets.find(m => m.key === marketType);
+    if (!market || !market.outcomes || market.outcomes.length !== 2) return;
+    const [o1, o2] = market.outcomes;
+    const p1 = impliedProb(o1.price);
+    const p2 = impliedProb(o2.price);
+    const sum = p1 + p2;
+    // Sanity: implied probs should sum to > 1 (vig) and < ~1.25 (extreme vig).
+    if (!(sum > 1.0 && sum < 1.25)) return;
+
+    [[o1, p1 / sum], [o2, p2 / sum]].forEach(([o, fair]) => {
+      const key = `${o.name}_${o.point || ''}`;
+      if (!perOutcomeFair[key]) perOutcomeFair[key] = [];
+      if (!perOutcomeOffers[key]) perOutcomeOffers[key] = [];
+      perOutcomeFair[key].push(fair);
+      perOutcomeOffers[key].push({ ...o, book: book.title });
+    });
+  });
+
+  return { perOutcomeFair, perOutcomeOffers };
 };
 
 // Check if a game should be excluded based on live score data
@@ -98,27 +147,18 @@ const findValueBets = (games, liveScores) => {
       // Don't recommend moneyline on live games — spreads and totals are more relevant
       if (isLive && marketType === "h2h") return;
 
-      const allOutcomes = {};
+      const { perOutcomeFair, perOutcomeOffers } = collectMarketFairProbs(game, marketType);
 
-      game.bookmakers.forEach(book => {
-        const market = book.markets.find(m => m.key === marketType);
-        if (!market) return;
+      Object.entries(perOutcomeOffers).forEach(([key, offers]) => {
+        if (offers.length < 2) return;
+        const fairProbs = perOutcomeFair[key];
+        if (!fairProbs || fairProbs.length < 2) return;
 
-        market.outcomes.forEach(outcome => {
-          const key = `${outcome.name}_${outcome.point || ''}`;
-          if (!allOutcomes[key]) allOutcomes[key] = [];
-          allOutcomes[key].push({ ...outcome, book: book.title });
-        });
-      });
+        // Median fair prob across books = our best estimate of true probability
+        // (vig removed per-book via two-way normalization).
+        const vigFreeProb = median(fairProbs);
 
-      Object.entries(allOutcomes).forEach(([key, outcomes]) => {
-        if (outcomes.length < 2) return;
-
-        const probs = outcomes.map(o => impliedProb(o.price));
-        const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
-        const vigFreeProb = avgProb * 0.95; // rough vig removal
-
-        outcomes.forEach(outcome => {
+        offers.forEach(outcome => {
           const thisProb = impliedProb(outcome.price);
           const ev = calcEV(outcome.price, vigFreeProb);
           const edgePercent = ((vigFreeProb - thisProb) / thisProb * 100);
@@ -247,25 +287,15 @@ const findSharpPlays = (games, liveScores) => {
 
     const marketTypes = ["h2h", "spreads", "totals"];
     marketTypes.forEach(marketType => {
-      const allOutcomes = {};
+      const { perOutcomeFair, perOutcomeOffers } = collectMarketFairProbs(game, marketType);
 
-      game.bookmakers.forEach(book => {
-        const market = book.markets.find(m => m.key === marketType);
-        if (!market) return;
-        market.outcomes.forEach(outcome => {
-          const key = `${outcome.name}_${outcome.point || ''}`;
-          if (!allOutcomes[key]) allOutcomes[key] = [];
-          allOutcomes[key].push({ ...outcome, book: book.title });
-        });
-      });
-
-      Object.entries(allOutcomes).forEach(([key, outcomes]) => {
+      Object.entries(perOutcomeOffers).forEach(([key, outcomes]) => {
         if (outcomes.length < 2) return;
+        const fairProbs = perOutcomeFair[key];
+        if (!fairProbs || fairProbs.length < 2) return;
 
         const prices = outcomes.map(o => o.price);
-        const probs = outcomes.map(o => impliedProb(o.price));
-        const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
-        const vigFreeProb = avgProb * 0.95;
+        const vigFreeProb = median(fairProbs);
 
         outcomes.forEach(outcome => {
           const thisProb = impliedProb(outcome.price);
@@ -674,8 +704,15 @@ const findNarrativePlays = (games, liveScores) => {
     const teamSpreads = spreadsData[blowoutTeam];
     if (!teamSpreads || teamSpreads.length === 0) return;
 
-    // Find best spread for the blowout loser (public likely overreacting)
-    const bestSpread = teamSpreads.sort((a, b) => b.point - a.point)[0]; // highest point spread = most value
+    // Find best spread for the blowout loser (public likely overreacting).
+    // Prefer higher point, but when two books are within 0.5 pt break the tie
+    // by implied payout (higher-paying American odds win).
+    const bestSpread = teamSpreads.slice().sort((a, b) => {
+      if (Math.abs(b.point - a.point) > 0.5) return b.point - a.point;
+      const payA = a.price > 0 ? a.price / 100 : 100 / Math.abs(a.price);
+      const payB = b.price > 0 ? b.price / 100 : 100 / Math.abs(b.price);
+      return payB - payA;
+    })[0];
 
     if (bestSpread.point > 0) {
       // They're an underdog — this is the narrative regression play
@@ -790,23 +827,30 @@ const UnitsInfo = ({ units, dark = false }) => {
             position: "absolute", top: "calc(100% + 6px)", right: 0,
             background: bg, color: fg,
             border: "1px solid #e2e5ea", borderRadius: 10,
-            padding: "12px 14px", width: 260, zIndex: 50,
+            padding: "14px 16px", width: 280, zIndex: 50,
             boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
             fontFamily: "'DM Sans', sans-serif", textAlign: "left",
             fontWeight: 400,
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: fg }}>What's a unit (u)?</div>
-          <div style={{ fontSize: 11, color: "#4a5568", lineHeight: 1.5, marginBottom: 8 }}>
-            A unit is the size of one flat bet. +200 odds pays +2.00u on a win; -150 pays +0.67u; a loss is -1.00u.
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, color: fg }}>What does "u" mean?</div>
+          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.55, marginBottom: 10 }}>
+            "u" stands for <strong>unit</strong>. A unit is just <strong>one bet</strong> — whatever size you'd pick.
+            If every bet you made was $10, then <strong>1u = $10</strong>. If every bet was $100, then <strong>1u = $100</strong>.
           </div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: fg, marginBottom: 6 }}>
-            If you'd bet a flat stake on every pick:
+          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.55, marginBottom: 10 }}>
+            So <strong>{sign}{abs.toFixed(2)}u</strong> means: if you'd bet the same amount on every single pick, you'd be {u >= 0 ? "up" : "down"} that many bets' worth of money.
           </div>
-          <div style={{ fontSize: 11, color: "#4a5568", lineHeight: 1.7 }}>
-            <div>$10/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 10)}</strong></div>
-            <div>$100/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 100)}</strong></div>
-            <div>$1,000/pick &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 1000)}</strong></div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: fg, marginBottom: 6 }}>
+            Here's what that looks like in real money:
+          </div>
+          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.8 }}>
+            <div>Bet $10 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 10)}</strong></div>
+            <div>Bet $100 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 100)}</strong></div>
+            <div>Bet $1,000 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 1000)}</strong></div>
+          </div>
+          <div style={{ fontSize: 10, color: "#8b919a", lineHeight: 1.5, marginTop: 10, paddingTop: 8, borderTop: "1px solid #f0f1f3" }}>
+            Tiny math note: a win on a big underdog pays more than a win on a favorite. Units already do that math for you.
           </div>
         </div>
       )}
@@ -1143,7 +1187,11 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
-  const [activeTab, setActiveTab] = useState("home");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeParams = useParams();
+  const activeTab = tabFromPath(location.pathname);
+  const setActiveTab = (tab) => navigate(TAB_PATHS[tab] || "/");
   const [pickFilter, setPickFilter] = useState("all"); // all|sharp|value|stale|rlm|narrative
   const [parlaySub, setParlaySub] = useState("safe"); // safe|correlated
   const [gamesSub, setGamesSub] = useState("odds"); // odds|scores
@@ -1167,7 +1215,10 @@ export default function App() {
   const [strategyStats, setStrategyStats] = useState({});
   const [resolvedPicks, setResolvedPicks] = useState([]);
   const [recordPeriod, setRecordPeriod] = useState("all"); // "7" | "30" | "all"
-  const [selectedStrategy, setSelectedStrategy] = useState(null);
+  // Drill-down strategy comes from the URL (/record/:strategy) so browser
+  // back works and links are shareable. Setter navigates.
+  const selectedStrategy = routeParams.strategy || null;
+  const setSelectedStrategy = (id) => navigate(id ? `/record/${id}` : "/record");
   const picksSentRef = useRef(false);
   const [userState, setUserState] = useState(null); // e.g. "UT", "NJ", etc.
   const [geoLoaded, setGeoLoaded] = useState(false);
@@ -1321,14 +1372,6 @@ export default function App() {
       .then(data => { if (data?.picks) setResolvedPicks(data.picks); })
       .catch(() => {});
   }, [activeTab]);
-
-  // Collapse the drill-down when the user leaves the Record tab so they
-  // land on the strategy list, not a stale sub-view, when they come back.
-  useEffect(() => {
-    if (activeTab !== "record" && selectedStrategy !== null) {
-      setSelectedStrategy(null);
-    }
-  }, [activeTab, selectedStrategy]);
 
   // POST picks to tracking API when data is ready (once per session)
   useEffect(() => {
