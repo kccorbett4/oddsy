@@ -22,6 +22,31 @@ export default async function handler(req, res) {
 
     const userId = await getUserIdFromRequest(req);
 
+    // ?peek=1 — diagnostic: return pick id prefix counts for all pick keys
+    // plus resolved/unresolved breakdown, so we can tell if saves or the
+    // resolver are the missing link for a given strategy.
+    if (req.query?.peek === "1") {
+      const byStrategy = {};
+      for await (const batch of client.scanIterator({ MATCH: "pick:*", COUNT: 500 })) {
+        const keys = Array.isArray(batch) ? batch : [batch];
+        for (const key of keys) {
+          const p = await client.hGetAll(key);
+          const s = p?.strategy || "?";
+          const slot = byStrategy[s] ||= { total: 0, resolved: 0, unresolved: 0, results: {} };
+          slot.total++;
+          if (p?.resolved === "true") {
+            slot.resolved++;
+            const r = p.result || "?";
+            slot.results[r] = (slot.results[r] || 0) + 1;
+          } else {
+            slot.unresolved++;
+          }
+        }
+      }
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({ byStrategy });
+    }
+
     const picks = [];
     let scanned = 0;
 
