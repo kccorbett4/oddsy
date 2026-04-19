@@ -465,16 +465,21 @@ async function handleOdds(req, res) {
       if (!resp.ok) continue;
       const data = await resp.json();
 
+      // Odds API shape for player props:
+      //   o.name        = "Over" | "Under" | "Yes" | "No"  (the side)
+      //   o.description = the player's name
+      // We want only the "Yes"/"Over" side (HR happens), keyed by player.
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
         const m = (bm.markets || []).find(x => x.key === "batter_home_runs");
         if (!m) continue;
         for (const o of (m.outcomes || [])) {
-          if (!o.name || !Number.isFinite(o.price)) continue;
-          if (o.description && /^(no|under)$/i.test(o.description)) continue;
-          const key = o.name.trim();
-          if (!byPlayer[key]) byPlayer[key] = [];
-          byPlayer[key].push({
+          if (!Number.isFinite(o.price)) continue;
+          if (o.name && /^(no|under)$/i.test(o.name)) continue;
+          const playerName = (o.description || "").trim();
+          if (!playerName) continue;
+          if (!byPlayer[playerName]) byPlayer[playerName] = [];
+          byPlayer[playerName].push({
             book: bm.title,
             overAmerican: o.price,
             overDecimal: +americanToDecimal(o.price).toFixed(3),
