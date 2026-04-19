@@ -2374,18 +2374,26 @@ export default function App() {
               deduped.push(p);
             });
 
-          const filtered = deduped.filter(p =>
-            (pickFilter === "all" || pickFilter === p.kind) &&
-            (activeSport === "all" || p.game?.sport_key === activeSport)
+          // Sport-scoped, post-dedupe base. Chip counts and the filtered
+          // list must both derive from this so clicking a chip never yields
+          // "0 picks" when the count says otherwise — the dedupe step can
+          // drop a Sharp entry if the same bet also trips RLM/Stale with a
+          // higher sortKey, so raw sharpPlays.length overcounts.
+          const sportScoped = deduped.filter(p =>
+            activeSport === "all" || p.game?.sport_key === activeSport
           );
+          const filtered = sportScoped.filter(p =>
+            pickFilter === "all" || pickFilter === p.kind
+          );
+          const countBy = (kind) => sportScoped.filter(p => p.kind === kind).length;
 
           const chips = [
-            { id: "all", label: "All Picks", count: deduped.length, color: "#1a1d23" },
-            { id: "sharp", label: "🧠 Sharp", count: sharpPlays.length, color: "#1a73e8" },
-            { id: "value", label: "⚡ Value", count: valueBets.length, color: "#0d9f4f" },
-            { id: "stale", label: "⏱️ Stale", count: staleLines.length, color: "#dc2626" },
-            { id: "rlm", label: "🔄 RLM", count: rlmPlays.length, color: "#7c3aed" },
-            { id: "narrative", label: "📉 Narrative", count: narrativePlays.length, color: "#d97706" },
+            { id: "all", label: "All Picks", count: sportScoped.length, color: "#1a1d23" },
+            { id: "sharp", label: "🧠 Sharp", count: countBy("sharp"), color: "#1a73e8" },
+            { id: "value", label: "⚡ Value", count: countBy("value"), color: "#0d9f4f" },
+            { id: "stale", label: "⏱️ Stale", count: countBy("stale"), color: "#dc2626" },
+            { id: "rlm", label: "🔄 RLM", count: countBy("rlm"), color: "#7c3aed" },
+            { id: "narrative", label: "📉 Narrative", count: countBy("narrative"), color: "#d97706" },
           ];
 
           const chipInfo = {
