@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { rankHrProjections, americanToDecimal, decimalToAmerican } from "./hrModel";
+import StadiumWindSvg from "./StadiumWindSvg";
 
 const formatOdds = (p) => (p > 0 ? `+${p}` : `${p}`);
 const formatPct = (p, d = 1) => `${(p * 100).toFixed(d)}%`;
@@ -48,8 +49,8 @@ export default function HomeRunsPage() {
     setError(null);
     try {
       const [c, o] = await Promise.all([
-        fetch(`/api/hr-context${force ? "?force=1" : ""}`).then(r => r.json()),
-        fetch(`/api/hr-odds${force ? "?force=1" : ""}`).then(r => r.json()),
+        fetch(`/api/hr?action=context${force ? "&force=1" : ""}`).then(r => r.json()),
+        fetch(`/api/hr?action=odds${force ? "&force=1" : ""}`).then(r => r.json()),
       ]);
       if (c?.error) throw new Error(`context: ${c.error}`);
       if (o?.error) throw new Error(`odds: ${o.error}`);
@@ -338,7 +339,7 @@ export default function HomeRunsPage() {
                         if (bvp[k] || !p.opposingPitcher?.playerId) return;
                         setBvp(prev => ({ ...prev, [k]: { loading: true } }));
                         try {
-                          const r = await fetch(`/api/hr-bvp?batter=${p.batterId}&pitcher=${p.opposingPitcher.playerId}`).then(r => r.json());
+                          const r = await fetch(`/api/hr?action=bvp&batter=${p.batterId}&pitcher=${p.opposingPitcher.playerId}`).then(r => r.json());
                           setBvp(prev => ({ ...prev, [k]: r }));
                         } catch (e) {
                           setBvp(prev => ({ ...prev, [k]: { error: e.message } }));
@@ -518,21 +519,22 @@ function DetailPanel({ pick, bvp, onBvp }) {
         </div>
       )}
 
-      {w && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-            Game-time weather {park.outdoor === false && "(dome — no effect)"}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+          Ballpark + wind
+        </div>
+        <StadiumWindSvg weather={w} park={pick.game.park} outdoor={pick.game.outdoor} />
+        {w && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
             <Row label="Temp" value={w.tempF != null ? `${w.tempF.toFixed(0)}°F` : "—"} />
-            <Row label="Wind" value={windLabel(w.windDirDeg, w.windMph, pick.game.park?.cfBearing) || "—"} />
             <Row label="Humidity" value={w.humidityPct != null ? `${w.humidityPct.toFixed(0)}%` : "—"} />
             <Row label="Pressure" value={w.pressureHpa != null ? `${w.pressureHpa.toFixed(0)} hPa` : "—"} />
             <Row label="Precip" value={w.precipIn != null ? `${w.precipIn.toFixed(2)}"` : "—"} />
             <Row label="Precip chance" value={w.precipProb != null ? `${w.precipProb}%` : "—"} />
+            <Row label="Park HR factor" value={pick.game.park?.hrFactor ? `×${pick.game.park.hrFactor}` : "—"} />
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontWeight: 700, fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>

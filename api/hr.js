@@ -1,32 +1,16 @@
-// HR context endpoint — pulls every input the model needs to project
-// today's MLB home-run probabilities.
+// Unified HR endpoint. One serverless function dispatches to three
+// sub-handlers based on ?action= so we stay under Vercel's function
+// count limit without losing any functionality.
 //
-// Sources:
-//   - MLB Stats API  (statsapi.mlb.com) — schedule, probable pitchers
-//     w/ pitchHand, confirmed lineups with batSide (populated ~90 min
-//     before first pitch), season hitter and pitcher stats, batter and
-//     pitcher L/R platoon splits via personIds hydrate, and per-matchup
-//     BvP history (handled by the sibling hr-bvp endpoint on-demand).
-//   - Baseball Savant — Statcast custom leaderboards for hitters (barrel
-//     rate, xISO, xSLG, hard-hit%, EV, LA) AND pitchers (opponent barrel
-//     rate allowed, opp hard-hit%, etc.). Cached separately with longer
-//     TTLs because they barely change intra-day.
-//   - Open-Meteo — hourly forecast for each open-air park: temperature,
-//     wind speed + direction, relative humidity, precipitation, surface
-//     pressure.
+//   /api/hr?action=context           — full modeling context payload
+//   /api/hr?action=odds              — batter_home_runs prop odds
+//   /api/hr?action=bvp&batter=X&pitcher=Y — career BvP history
 //
-// Cached 30 min in Redis. Savant leaderboards cached 6h separately.
+// Each sub-handler caches independently in Redis with its own TTL.
 import { createClient } from "redis";
 import { parkFor } from "./_hr_parks.js";
 
-const CACHE_KEY = "hrctx:v2";
-const SAVANT_BAT_KEY = "hrctx:savant:bat:v1";
-const SAVANT_PIT_KEY = "hrctx:savant:pit:v1";
-const CACHE_TTL = 1800;
-const SAVANT_TTL = 21600;
-
-const ymd = (d) => d.toISOString().slice(0, 10);
-
+// ──────────────────────── shared helpers ────────────────────────
 async function jsonFetch(url) {
   try {
     const r = await fetch(url);
@@ -34,7 +18,6 @@ async function jsonFetch(url) {
     return await r.json();
   } catch { return null; }
 }
-
 async function textFetch(url) {
   try {
     const r = await fetch(url);
@@ -42,10 +25,31 @@ async function textFetch(url) {
     return await r.text();
   } catch { return null; }
 }
+const ymd = (d) => d.toISOString().slice(0, 10);
+const americanToDecimal = (a) => {
+  if (!Number.isFinite(a)) return null;
+  return a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
+};
+
+async function getRedis() {
+  if (!process.env.REDIS_URL) return null;
+  try {
+    const redis = createClient({ url: process.env.REDIS_URL });
+    await redis.connect();
+    return redis;
+  } catch {
+    return null;
+  }
+}
+
+// ──────────────────────── context handler ────────────────────────
+const CTX_KEY = "hrctx:v2";
+const SAVANT_BAT_KEY = "hrctx:savant:bat:v1";
+const SAVANT_PIT_KEY = "hrctx:savant:pit:v1";
+const CTX_TTL = 1800;
+const SAVANT_TTL = 21600;
 
 async function fetchSchedule(dateStr) {
-  // Hydrate everything we can in one call: probable pitchers with hand,
-  // lineups with batSide, team, venue.
   const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateStr}`
     + `&hydrate=probablePitcher,lineups,team,venue,person`;
   const j = await jsonFetch(url);
@@ -108,10 +112,33 @@ async function fetchPitcherSeasonStats(season) {
   return map;
 }
 
-// Bulk-fetch L/R platoon splits for a list of personIds via hydrate.
-// MLB Stats API accepts personIds=1,2,3,... up to ~100 per call. We
-// chunk to keep URLs short, and we request hitting+pitching splits in
-// separate calls so the hydrate params match.
+function extractHittingSplit(st) {
+  if (!st) return null;
+  const hr = parseInt(st.homeRuns || "0");
+  const pa = parseInt(st.plateAppearances || "0");
+  const slg = parseFloat(st.slg || "0");
+  const avg = parseFloat(st.avg || "0");
+  return {
+    pa, hr,
+    hrPerPA: pa > 0 ? +(hr / pa).toFixed(4) : 0,
+    slg, avg,
+    iso: +(slg - avg).toFixed(3),
+    ops: parseFloat(st.ops || "0"),
+  };
+}
+function extractPitchingSplit(st) {
+  if (!st) return null;
+  const hr = parseInt(st.homeRuns || "0");
+  const ip = parseFloat(st.inningsPitched || "0");
+  const tbf = parseInt(st.battersFaced || "0");
+  return {
+    tbf, hr, ip,
+    hrPer9: ip > 0 ? +((hr / ip) * 9).toFixed(3) : 0,
+    hrPerPA: tbf > 0 ? +(hr / tbf).toFixed(4) : 0,
+    slgAgainst: parseFloat(st.slg || "0"),
+  };
+}
+
 async function fetchBatterSplits(personIds, season) {
   if (personIds.length === 0) return {};
   const chunks = [];
@@ -126,7 +153,7 @@ async function fetchBatterSplits(personIds, season) {
       const vsL = splits.find(s => s.split?.code === "vl");
       const vsR = splits.find(s => s.split?.code === "vr");
       out[p.id] = {
-        batSide: p.batSide?.code || null,  // L, R, or S (switch)
+        batSide: p.batSide?.code || null,
         vsL: vsL ? extractHittingSplit(vsL.stat) : null,
         vsR: vsR ? extractHittingSplit(vsR.stat) : null,
       };
@@ -149,7 +176,7 @@ async function fetchPitcherSplits(personIds, season) {
       const vsL = splits.find(s => s.split?.code === "vl");
       const vsR = splits.find(s => s.split?.code === "vr");
       out[p.id] = {
-        pitchHand: p.pitchHand?.code || null,  // L or R
+        pitchHand: p.pitchHand?.code || null,
         vsL: vsL ? extractPitchingSplit(vsL.stat) : null,
         vsR: vsR ? extractPitchingSplit(vsR.stat) : null,
       };
@@ -158,34 +185,18 @@ async function fetchPitcherSplits(personIds, season) {
   return out;
 }
 
-function extractHittingSplit(st) {
-  if (!st) return null;
-  const hr = parseInt(st.homeRuns || "0");
-  const pa = parseInt(st.plateAppearances || "0");
-  const slg = parseFloat(st.slg || "0");
-  const avg = parseFloat(st.avg || "0");
-  return {
-    pa, hr,
-    hrPerPA: pa > 0 ? +(hr / pa).toFixed(4) : 0,
-    slg, avg,
-    iso: +(slg - avg).toFixed(3),
-    ops: parseFloat(st.ops || "0"),
-  };
+function splitCsvRow(line) {
+  const out = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
 }
-
-function extractPitchingSplit(st) {
-  if (!st) return null;
-  const hr = parseInt(st.homeRuns || "0");
-  const ip = parseFloat(st.inningsPitched || "0");
-  const tbf = parseInt(st.battersFaced || "0");
-  return {
-    tbf, hr, ip,
-    hrPer9: ip > 0 ? +((hr / ip) * 9).toFixed(3) : 0,
-    hrPerPA: tbf > 0 ? +(hr / tbf).toFixed(4) : 0,
-    slgAgainst: parseFloat(st.slg || "0"),
-  };
-}
-
 function parseSavantCsv(csv, kind) {
   if (!csv || typeof csv !== "string") return {};
   const lines = csv.trim().split(/\r?\n/);
@@ -230,33 +241,15 @@ function parseSavantCsv(csv, kind) {
   }
   return out;
 }
-
-function splitCsvRow(line) {
-  const out = [];
-  let cur = "", inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQ = !inQ; continue; }
-    if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
-    cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-
 async function fetchSavantBatters(season) {
   const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=batter&filter=&min=50`
     + `&selections=b_total_pa,barrels_per_pa_percent,barrel_batted_rate,xiso,xslg,hard_hit_percent,exit_velocity_avg,launch_angle_avg&csv=true`;
-  const csv = await textFetch(url);
-  return parseSavantCsv(csv, "batter");
+  return parseSavantCsv(await textFetch(url), "batter");
 }
-
 async function fetchSavantPitchers(season) {
-  // Pitcher custom leaderboard — opponent contact quality metrics.
   const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=pitcher&filter=&min=50`
     + `&selections=p_total_pa,barrels_per_pa_percent,barrel_batted_rate,xiso,xslg,hard_hit_percent,exit_velocity_avg,launch_angle_avg&csv=true`;
-  const csv = await textFetch(url);
-  return parseSavantCsv(csv, "pitcher");
+  return parseSavantCsv(await textFetch(url), "pitcher");
 }
 
 async function fetchWeather(lat, lon, commenceIso) {
@@ -286,29 +279,22 @@ async function fetchWeather(lat, lon, commenceIso) {
   };
 }
 
-export default async function handler(req, res) {
+async function handleContext(req, res) {
   const force = req.query?.force === "1";
-  let redis = null;
+  const redis = await getRedis();
   try {
-    if (process.env.REDIS_URL) {
-      try {
-        redis = createClient({ url: process.env.REDIS_URL });
-        await redis.connect();
-        if (!force) {
-          const cached = await redis.get(CACHE_KEY);
-          if (cached) {
-            res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
-            return res.status(200).json(JSON.parse(cached));
-          }
-        }
-      } catch { redis = null; }
+    if (redis && !force) {
+      const cached = await redis.get(CTX_KEY).catch(() => null);
+      if (cached) {
+        res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
+        return res.status(200).json(JSON.parse(cached));
+      }
     }
 
     const now = new Date();
     const todayStr = ymd(now);
     const season = now.getUTCFullYear();
 
-    // Savant — use cache if present, else refresh.
     let savantBatters = {}, savantPitchers = {};
     if (redis) {
       try {
@@ -335,7 +321,6 @@ export default async function handler(req, res) {
       ...savantTasks,
     ]);
 
-    // Persist Savant if we just fetched it.
     if (redis) {
       try {
         if (Object.keys(savantBatters).length > 0)
@@ -345,7 +330,6 @@ export default async function handler(req, res) {
       } catch {}
     }
 
-    // Build game objects + collect player IDs for splits batch.
     const games = [];
     const weatherTasks = [];
     const batterIdsToday = new Set();
@@ -371,7 +355,6 @@ export default async function handler(req, res) {
       });
 
       const park = parkFor(home);
-
       if (probHome?.id) pitcherIdsToday.add(probHome.id);
       if (probAway?.id) pitcherIdsToday.add(probAway.id);
 
@@ -382,24 +365,12 @@ export default async function handler(req, res) {
         status: g.status?.detailedState || null,
         home, away,
         venue: g.venue?.name || null,
-        park: park ? {
-          hrFactor: park.hrFactor,
-          cfBearing: park.cfBearing,
-          outdoor: park.outdoor,
-        } : null,
+        park: park ? { hrFactor: park.hrFactor, cfBearing: park.cfBearing, outdoor: park.outdoor } : null,
         outdoor: park ? park.outdoor : true,
         weather: null,
         probablePitchers: {
-          home: probHome ? {
-            playerId: probHome.id,
-            name: probHome.fullName,
-            pitchHand: probHome.pitchHand?.code || null,
-          } : null,
-          away: probAway ? {
-            playerId: probAway.id,
-            name: probAway.fullName,
-            pitchHand: probAway.pitchHand?.code || null,
-          } : null,
+          home: probHome ? { playerId: probHome.id, name: probHome.fullName, pitchHand: probHome.pitchHand?.code || null } : null,
+          away: probAway ? { playerId: probAway.id, name: probAway.fullName, pitchHand: probAway.pitchHand?.code || null } : null,
         },
         lineups: {
           home: mapLineup(rawLineups.homePlayers),
@@ -409,14 +380,11 @@ export default async function handler(req, res) {
       };
 
       if (park && park.outdoor) {
-        weatherTasks.push(
-          fetchWeather(park.lat, park.lon, g.gameDate).then(w => ({ gameId: g.gamePk, w }))
-        );
+        weatherTasks.push(fetchWeather(park.lat, park.lon, g.gameDate).then(w => ({ gameId: g.gamePk, w })));
       }
       games.push(gameObj);
     }
 
-    // Platoon splits for everyone on today's card (in parallel w/ weather).
     const [weatherResults, batterSplits, pitcherSplits] = await Promise.all([
       Promise.all(weatherTasks),
       fetchBatterSplits([...batterIdsToday], season),
@@ -430,15 +398,10 @@ export default async function handler(req, res) {
     }
 
     const payload = {
-      date: todayStr,
-      season,
-      games,
-      batters,
-      pitchers,
-      savantBatters,
-      savantPitchers,
-      batterSplits,   // { [id]: { batSide, vsL, vsR } }
-      pitcherSplits,  // { [id]: { pitchHand, vsL, vsR } }
+      date: todayStr, season, games,
+      batters, pitchers,
+      savantBatters, savantPitchers,
+      batterSplits, pitcherSplits,
       updatedAt: new Date().toISOString(),
       batterCount: Object.keys(batters).length,
       pitcherCount: Object.keys(pitchers).length,
@@ -447,14 +410,178 @@ export default async function handler(req, res) {
     };
 
     if (redis) {
-      try { await redis.set(CACHE_KEY, JSON.stringify(payload), { EX: CACHE_TTL }); } catch {}
+      try { await redis.set(CTX_KEY, JSON.stringify(payload), { EX: CTX_TTL }); } catch {}
     }
 
     res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
     return res.status(200).json(payload);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
   } finally {
     if (redis) await redis.disconnect().catch(() => {});
+  }
+}
+
+// ──────────────────────── odds handler ────────────────────────
+const ODDS_KEY = "hrodds:v1";
+const ODDS_TTL = 6 * 3600;
+
+async function handleOdds(req, res) {
+  const API_KEY = process.env.ODDS_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+
+  const force = req.query?.force === "1";
+  const redis = await getRedis();
+  try {
+    if (redis && !force) {
+      const cached = await redis.get(ODDS_KEY).catch(() => null);
+      if (cached) {
+        res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=1800");
+        return res.status(200).json(JSON.parse(cached));
+      }
+    }
+
+    const eventsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/events?apiKey=${API_KEY}`;
+    const eventList = await jsonFetch(eventsUrl);
+    if (!Array.isArray(eventList)) {
+      return res.status(502).json({ error: "Failed to fetch event list" });
+    }
+
+    const now = Date.now();
+    const soon = eventList.filter(e => {
+      if (!e.commence_time) return false;
+      const ms = new Date(e.commence_time).getTime();
+      return ms > now - 3 * 3600 * 1000 && ms < now + 36 * 3600 * 1000;
+    });
+
+    let creditsRemaining = null;
+    let creditsUsed = null;
+    const events = [];
+
+    for (const ev of soon) {
+      const oddsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/events/${ev.id}/odds`
+        + `?apiKey=${API_KEY}&regions=us&markets=batter_home_runs&oddsFormat=american`;
+      const resp = await fetch(oddsUrl);
+      creditsRemaining = resp.headers.get("x-requests-remaining") || creditsRemaining;
+      creditsUsed = resp.headers.get("x-requests-used") || creditsUsed;
+      if (!resp.ok) continue;
+      const data = await resp.json();
+
+      const byPlayer = {};
+      for (const bm of (data.bookmakers || [])) {
+        const m = (bm.markets || []).find(x => x.key === "batter_home_runs");
+        if (!m) continue;
+        for (const o of (m.outcomes || [])) {
+          if (!o.name || !Number.isFinite(o.price)) continue;
+          if (o.description && /^(no|under)$/i.test(o.description)) continue;
+          const key = o.name.trim();
+          if (!byPlayer[key]) byPlayer[key] = [];
+          byPlayer[key].push({
+            book: bm.title,
+            overAmerican: o.price,
+            overDecimal: +americanToDecimal(o.price).toFixed(3),
+          });
+        }
+      }
+
+      events.push({
+        eventId: ev.id,
+        sport_key: "baseball_mlb",
+        commence: ev.commence_time,
+        home: ev.home_team,
+        away: ev.away_team,
+        players: Object.entries(byPlayer).map(([name, books]) => ({ name, books })),
+      });
+    }
+
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      creditsRemaining, creditsUsed,
+      eventCount: events.length,
+      events,
+    };
+
+    if (redis) {
+      try { await redis.set(ODDS_KEY, JSON.stringify(payload), { EX: ODDS_TTL }); } catch {}
+    }
+
+    res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=1800");
+    return res.status(200).json(payload);
+  } finally {
+    if (redis) await redis.disconnect().catch(() => {});
+  }
+}
+
+// ──────────────────────── bvp handler ────────────────────────
+const BVP_TTL = 86400;
+
+async function handleBvp(req, res) {
+  const batterId = req.query?.batter;
+  const pitcherId = req.query?.pitcher;
+  if (!batterId || !pitcherId) {
+    return res.status(400).json({ error: "batter and pitcher query params required" });
+  }
+  const cacheKey = `hrbvp:${batterId}:${pitcherId}`;
+  const redis = await getRedis();
+  try {
+    if (redis) {
+      const cached = await redis.get(cacheKey).catch(() => null);
+      if (cached) {
+        res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
+        return res.status(200).json(JSON.parse(cached));
+      }
+    }
+
+    const url = `https://statsapi.mlb.com/api/v1/people/${batterId}/stats`
+      + `?stats=vsPlayer&opposingPlayerId=${pitcherId}&group=hitting`;
+    const j = await jsonFetch(url);
+
+    const splits = j?.stats?.[0]?.splits || [];
+    let pa = 0, ab = 0, h = 0, hr = 0, bb = 0, k = 0, xbh = 0, tb = 0;
+    for (const s of splits) {
+      const st = s.stat || {};
+      pa += parseInt(st.plateAppearances || "0");
+      ab += parseInt(st.atBats || "0");
+      h += parseInt(st.hits || "0");
+      hr += parseInt(st.homeRuns || "0");
+      bb += parseInt(st.baseOnBalls || "0");
+      k += parseInt(st.strikeOuts || "0");
+      xbh += parseInt(st.doubles || "0") + parseInt(st.triples || "0") + parseInt(st.homeRuns || "0");
+      tb += parseInt(st.totalBases || "0");
+    }
+    const avg = ab > 0 ? h / ab : 0;
+    const slg = ab > 0 ? tb / ab : 0;
+    const payload = {
+      batterId, pitcherId,
+      pa, ab, h, hr, bb, k, xbh, tb,
+      avg: +avg.toFixed(3),
+      slg: +slg.toFixed(3),
+      iso: +(slg - avg).toFixed(3),
+      hrPerAB: ab > 0 ? +(hr / ab).toFixed(4) : 0,
+      sampleNote: pa < 15
+        ? "small sample — use as a tiebreaker, not a signal"
+        : pa < 40 ? "moderate sample" : "meaningful sample",
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (redis) {
+      try { await redis.set(cacheKey, JSON.stringify(payload), { EX: BVP_TTL }); } catch {}
+    }
+
+    res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
+    return res.status(200).json(payload);
+  } finally {
+    if (redis) await redis.disconnect().catch(() => {});
+  }
+}
+
+// ──────────────────────── dispatcher ────────────────────────
+export default async function handler(req, res) {
+  const action = req.query?.action || "context";
+  try {
+    if (action === "context") return await handleContext(req, res);
+    if (action === "odds") return await handleOdds(req, res);
+    if (action === "bvp") return await handleBvp(req, res);
+    return res.status(400).json({ error: `Unknown action: ${action}` });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
