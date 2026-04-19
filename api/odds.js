@@ -19,32 +19,31 @@ export default async function handler(req, res) {
   }
 
   const markets = req.query.markets || "h2h,spreads,totals";
-  const regions = "us";
+  // US books only: us + us2 covers DK, FD, BetMGM, Caesars, BetRivers,
+  // Fanatics, Hard Rock, ESPN Bet, PrizePicks, Underdog, Kalshi, Polymarket.
+  // Override via ?regions= to reach UK/EU/AU books at 2.5× the credit cost.
+  const regions = req.query.regions || "us,us2";
   const oddsFormat = "american";
 
-  // Only fetch sports currently in season to save API credits
-  // Each sport = 1 API request. Update this list seasonally.
+  // Curated list of the most popular US-market sports. Seasonal filter
+  // keeps us from querying leagues that have no events (wasted credits).
   const now = new Date();
-  const month = now.getMonth(); // 0-indexed: 0=Jan, 3=Apr, 8=Sep
+  const month = now.getMonth();
 
   const sports = [];
-
-  // NBA: Oct (9) - Jun (5)
   if (month >= 9 || month <= 5) sports.push("basketball_nba");
-  // NHL: Oct (9) - Jun (5)
   if (month >= 9 || month <= 5) sports.push("icehockey_nhl");
-  // MLB: Mar (2) - Oct (9)
   if (month >= 2 && month <= 9) sports.push("baseball_mlb");
-  // NFL: Sep (8) - Feb (1)
   if (month >= 8 || month <= 1) sports.push("americanfootball_nfl");
-  // NCAAF: Aug (7) - Jan (0)
   if (month >= 7 || month === 0) sports.push("americanfootball_ncaaf");
-  // NCAAB: Nov (10) - Apr (3)
   if (month >= 10 || month <= 3) sports.push("basketball_ncaab");
-  // MLS: Feb (1) - Nov (10)
   if (month >= 1 && month <= 10) sports.push("soccer_usa_mls");
-  // MMA: year-round
+  // Year-round combat sports + golf + tennis (major tours)
   sports.push("mma_mixed_martial_arts");
+  sports.push("boxing_boxing");
+  sports.push("tennis_atp");
+  sports.push("tennis_wta");
+  sports.push("golf_pga_championship_winner");
 
   try {
     const allGames = [];
@@ -55,28 +54,26 @@ export default async function handler(req, res) {
       const url = buildOddsUrl(sport, { apiKey: API_KEY, regions, markets, oddsFormat });
       const response = await fetch(url);
 
-      remaining = response.headers.get("x-requests-remaining");
-      used = response.headers.get("x-requests-used");
+      remaining = response.headers.get("x-requests-remaining") || remaining;
+      used = response.headers.get("x-requests-used") || used;
 
       if (response.ok) {
         const data = await response.json();
-        allGames.push(...data);
+        allGames.push(...(Array.isArray(data) ? data : []));
       }
-      // If a sport has no events (404), just skip it
     }
 
-    // Filter out games that started more than 6 hours ago
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const freshGames = allGames.filter(g => g.commence_time > sixHoursAgo || !g.commence_time);
 
-    // Cache for 15 min fresh, serve stale for 15 more min while revalidating.
-    // Odds API gets hit ~once per 15 min by Vercel CDN, not per visitor.
     res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
     return res.status(200).json({
       games: freshGames,
       requestsRemaining: remaining,
       requestsUsed: used,
       sportsQueried: sports.length,
+      regions,
+      markets,
       provider: PROVIDER,
       cachedAt: new Date().toISOString(),
     });

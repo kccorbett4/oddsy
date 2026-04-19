@@ -32,6 +32,20 @@ const americanToDecimal = (a) => {
   return a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
 };
 
+// Odds provider toggle — mirrors api/odds.js. Flip ODDS_PROVIDER=theoddsapi
+// in Vercel to revert. parlay-api uses "player_home_runs" where The Odds
+// API uses "batter_home_runs".
+const ODDS_PROVIDER = (process.env.ODDS_PROVIDER || "parlay").toLowerCase();
+const ODDS_BASE = ODDS_PROVIDER === "theoddsapi"
+  ? "https://api.the-odds-api.com/v4"
+  : "https://parlay-api.com/v1";
+const HR_MARKET_KEY = ODDS_PROVIDER === "theoddsapi" ? "batter_home_runs" : "player_home_runs";
+function oddsApiKey() {
+  return ODDS_PROVIDER === "theoddsapi"
+    ? process.env.ODDS_API_KEY
+    : (process.env.PARLAY_API_KEY || process.env.ODDS_API_KEY);
+}
+
 // ──────────────────────── context handler ────────────────────────
 const CTX_KEY = "hrctx:v2";
 const SAVANT_BAT_KEY = "hrctx:savant:bat:v1";
@@ -430,7 +444,7 @@ const SCRAPE_KEY = "hrscrape:v1";
 const SCRAPE_TTL = 6 * 3600;
 
 async function handleOdds(req, res) {
-  const API_KEY = process.env.ODDS_API_KEY;
+  const API_KEY = oddsApiKey();
   if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
 
   const force = req.query?.force === "1";
@@ -444,7 +458,7 @@ async function handleOdds(req, res) {
       }
     }
 
-    const eventsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/events?apiKey=${API_KEY}`;
+    const eventsUrl = `${ODDS_BASE}/sports/baseball_mlb/events?apiKey=${API_KEY}`;
     const eventList = await jsonFetch(eventsUrl);
     if (!Array.isArray(eventList)) {
       return res.status(502).json({ error: "Failed to fetch event list" });
@@ -467,8 +481,8 @@ async function handleOdds(req, res) {
       // regions=us,us2 picks up Fanatics, HardRock, Bally, ESPN Bet, etc.
       // that aren't in the "us" group. Cost is same — we're billed per
       // market, not per region.
-      const oddsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/events/${ev.id}/odds`
-        + `?apiKey=${API_KEY}&regions=us,us2&markets=batter_home_runs&oddsFormat=american`;
+      const oddsUrl = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
+        + `?apiKey=${API_KEY}&regions=us,us2&markets=${HR_MARKET_KEY}&oddsFormat=american`;
       const resp = await fetch(oddsUrl);
       creditsRemaining = resp.headers.get("x-requests-remaining") || creditsRemaining;
       creditsUsed = resp.headers.get("x-requests-used") || creditsUsed;
@@ -488,7 +502,7 @@ async function handleOdds(req, res) {
       };
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
-        const m = (bm.markets || []).find(x => x.key === "batter_home_runs");
+        const m = (bm.markets || []).find(x => x.key === HR_MARKET_KEY);
         if (!m) continue;
         bookDiag.postingHR.push(bm.title);
         for (const o of (m.outcomes || [])) {
@@ -651,11 +665,11 @@ async function handleBvp(req, res) {
 // of a plan-tier limit on props, or because the plan doesn't include
 // those books at all.
 async function handleCoverage(req, res) {
-  const API_KEY = process.env.ODDS_API_KEY;
+  const API_KEY = oddsApiKey();
   if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
 
   const regions = "us,us2";
-  const h2hUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds`
+  const h2hUrl = `${ODDS_BASE}/sports/baseball_mlb/odds`
     + `?apiKey=${API_KEY}&regions=${regions}&markets=h2h&oddsFormat=american`;
   const r = await fetch(h2hUrl);
   const remaining = r.headers.get("x-requests-remaining");
