@@ -9,6 +9,7 @@
 // Each sub-handler caches independently in Redis with its own TTL.
 import { createClient } from "redis";
 import { parkFor } from "./_hr_parks.js";
+import { fetchScrapedHr, mergeScrapedIntoEvents } from "./_hr_scrape.js";
 
 // ──────────────────────── shared helpers ────────────────────────
 async function jsonFetch(url) {
@@ -429,6 +430,8 @@ async function handleContext(req, res) {
 // ──────────────────────── odds handler ────────────────────────
 const ODDS_KEY = "hrodds:v1";
 const ODDS_TTL = 6 * 3600;
+const SCRAPE_KEY = "hrscrape:v1";
+const SCRAPE_TTL = 6 * 3600;
 
 async function handleOdds(req, res) {
   const API_KEY = process.env.ODDS_API_KEY;
@@ -530,11 +533,44 @@ async function handleOdds(req, res) {
       });
     }
 
+    // Supplement Odds API with DK/FanDuel scrape. Cached separately so a
+    // flaky sportsbook endpoint doesn't invalidate the main odds cache.
+    let scraped = null;
+    if (redis && !force) {
+      try {
+        const c = await redis.get(SCRAPE_KEY);
+        if (c) scraped = JSON.parse(c);
+      } catch {}
+    }
+    if (!scraped) {
+      try { scraped = await fetchScrapedHr(); }
+      catch (e) { scraped = { draftkings: { ok: false, error: e.message, events: [] }, fanduel: { ok: false, error: e.message, events: [] } }; }
+      if (redis) {
+        try { await redis.set(SCRAPE_KEY, JSON.stringify(scraped), { EX: SCRAPE_TTL }); } catch {}
+      }
+    }
+
+    let dkAttached = 0, fdAttached = 0;
+    if (scraped?.draftkings?.ok) {
+      dkAttached = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
+    }
+    if (scraped?.fanduel?.ok) {
+      fdAttached = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
+    }
+
     const payload = {
       updatedAt: new Date().toISOString(),
       creditsRemaining, creditsUsed,
       eventCount: events.length,
       events,
+      scrapers: {
+        draftkings: scraped?.draftkings?.ok
+          ? { ok: true, eventCount: scraped.draftkings.eventCount, attached: dkAttached }
+          : { ok: false, error: scraped?.draftkings?.error || "unknown", attached: 0 },
+        fanduel: scraped?.fanduel?.ok
+          ? { ok: true, eventCount: scraped.fanduel.eventCount, attached: fdAttached }
+          : { ok: false, error: scraped?.fanduel?.error || "unknown", attached: 0 },
+      },
     };
 
     if (redis) {
