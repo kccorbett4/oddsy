@@ -66,6 +66,18 @@ export default async function handler(req, res) {
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const freshGames = allGames.filter(g => g.commence_time > sixHoursAgo || !g.commence_time);
 
+    // Strip state-specific Hard Rock feeds — they're only bettable from that
+    // state and duplicate the nationwide `hardrockbet` line. Keeping them in
+    // the book list just skews cross-book consensus for no upside.
+    const STATE_SPECIFIC_BOOKS = new Set([
+      "hardrockbet_az", "hardrockbet_fl", "hardrockbet_oh",
+    ]);
+    for (const g of freshGames) {
+      if (Array.isArray(g.bookmakers)) {
+        g.bookmakers = g.bookmakers.filter(b => !STATE_SPECIFIC_BOOKS.has(b.key));
+      }
+    }
+
     res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
     return res.status(200).json({
       games: freshGames,

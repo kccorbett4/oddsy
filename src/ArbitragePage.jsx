@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import SiteNav from "./SiteNav.jsx";
 
 const formatOdds = (o) => (o > 0 ? `+${o}` : `${o}`);
 const americanToDecimal = (a) => (a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
@@ -42,7 +43,7 @@ export default function ArbitragePage() {
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sport, setSport] = useState("baseball_mlb");
+  const [sport, setSport] = useState("");
   const [bankroll, setBankroll] = useState(100);
 
   const loadData = async (sportFilter = "") => {
@@ -92,15 +93,15 @@ export default function ArbitragePage() {
   }[k] || k);
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 16px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f5f6f8", fontFamily: "system-ui, -apple-system, sans-serif", paddingBottom: 100 }}>
       <Helmet>
         <title>Arbitrage Opportunities — MyOddsy</title>
         <meta name="description" content="Guaranteed-profit arbitrage opportunities across US sportsbooks. Live stakes split to lock in risk-free returns." />
       </Helmet>
 
-      <div style={{ marginBottom: 20 }}>
-        <Link to="/" style={{ color: "#1a73e8", textDecoration: "none", fontSize: 13 }}>← Home</Link>
-      </div>
+      <SiteNav />
+
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 16px" }}>
 
       <h1 style={{ fontSize: 28, margin: "0 0 6px 0" }}>Arbitrage Opportunities</h1>
       <p style={{ margin: "0 0 20px 0", color: "#555", fontSize: 14, lineHeight: 1.5 }}>
@@ -116,8 +117,8 @@ export default function ArbitragePage() {
             onChange={e => setSport(e.target.value)}
             style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d5d8de", fontSize: 13 }}
           >
+            <option value="">All sports in season</option>
             <option value="baseball_mlb">MLB</option>
-            <option value="">All in season (10× credits)</option>
             <option value="basketball_nba">NBA</option>
             <option value="basketball_ncaab">NCAAB</option>
             <option value="americanfootball_nfl">NFL</option>
@@ -206,6 +207,7 @@ export default function ArbitragePage() {
           Updated {meta.cachedAt ? new Date(meta.cachedAt).toLocaleTimeString() : "—"} · {meta.creditsRemaining ? `${meta.creditsRemaining} credits remaining` : ""}
         </div>
       )}
+      </div>
     </div>
   );
 }

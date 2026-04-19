@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { rankHrProjections, americanToDecimal, decimalToAmerican } from "./hrModel";
 import StadiumWindSvg from "./StadiumWindSvg";
+import SiteNav from "./SiteNav.jsx";
 
 const formatOdds = (p) => (p > 0 ? `+${p}` : `${p}`);
 const formatPct = (p, d = 1) => `${(p * 100).toFixed(d)}%`;
@@ -180,13 +181,14 @@ export default function HomeRunsPage() {
         * { box-sizing: border-box; }
       `}</style>
 
+      <SiteNav />
+
       <header style={{
         background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
         color: "#fff", padding: "26px 20px 20px",
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <Link to="/" style={{ fontSize: 12, color: "#94a3b8", textDecoration: "none" }}>← Back to app</Link>
-          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "10px 0 6px" }}>💣 Home Run Hunter</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "0 0 6px" }}>💣 Home Run Hunter</h1>
           <p style={{ fontSize: 13, color: "#cbd5e1", margin: "0 0 12px", lineHeight: 1.55, maxWidth: 780 }}>
             Every MLB HR prop on the board, ranked by our edge against the best book price.
             Projections blend season Statcast, pitcher matchup quality, ballpark effects, and live

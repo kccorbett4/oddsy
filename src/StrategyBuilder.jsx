@@ -10,6 +10,7 @@ import { useAuth } from "./lib/AuthContext.jsx";
 import AuthModal from "./lib/AuthModal.jsx";
 import { fetchStrategies, saveStrategy, deleteStrategy } from "./lib/strategies.js";
 import { powerDevig } from "./evMath.js";
+import SiteNav from "./SiteNav.jsx";
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈" },
@@ -1135,20 +1136,16 @@ function Shell({ children }) {
       <header style={{
         padding: "16px 20px 0",
         background: "#fff",
-        borderBottom: "1px solid #e2e5ea",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <Link to="/" style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
             <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 80, display: "block", maxWidth: "75vw" }} />
           </Link>
-          <Link to="/" style={{
-            fontSize: 12, fontWeight: 700, color: "#1a73e8", textDecoration: "none",
-            padding: "8px 12px", border: "1px solid #e2e5ea", borderRadius: 10, background: "#fff",
-          }}>← Home</Link>
         </div>
       </header>
+      <SiteNav />
 
-      <main style={{ padding: "18px 20px 60px", maxWidth: 900, margin: "0 auto" }}>
+      <main style={{ padding: "18px 20px 100px", maxWidth: 900, margin: "0 auto" }}>
         {children}
       </main>
     </div>

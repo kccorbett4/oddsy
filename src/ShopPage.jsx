@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import SiteNav from "./SiteNav.jsx";
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈" },
@@ -91,20 +92,21 @@ export default function ShopPage() {
         * { box-sizing: border-box; }
       `}</style>
 
+      <SiteNav />
+
       <header style={{
         background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
         color: "#fff", padding: "28px 20px 22px",
       }}>
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <Link to="/" style={{ fontSize: 12, color: "#a0aec0", textDecoration: "none" }}>← Back to app</Link>
-          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "10px 0 6px" }}>🏦 Book Shop</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "0 0 6px" }}>🏦 Book Shop</h1>
           <p style={{ fontSize: 14, color: "#cbd5e0", margin: 0, lineHeight: 1.5 }}>
             Every book's price for every outcome, side by side. The highlighted cell is the best line — that's where you want to bet.
           </p>
         </div>
       </header>
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "18px 16px 80px" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "18px 16px 110px" }}>
         {/* Filters */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
           <input

@@ -498,8 +498,12 @@ async function handleOdds(req, res) {
         returned: (data.bookmakers || []).map(b => b.title),
         postingHR: [],
       };
+      // State-specific Hard Rock licenses are bettable only in that state
+      // and duplicate the nationwide "Hard Rock Bet" line, so we drop them.
+      const STATE_HARDROCK = /^Hard Rock Bet \((AZ|FL|OH)\)$/;
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
+        if (STATE_HARDROCK.test(bm.title || "")) continue;
         const m = (bm.markets || []).find(x => x.key === HR_MARKET_KEY);
         if (!m) continue;
         bookDiag.postingHR.push(bm.title);

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { rankHrProjections, buildRecommendedParlays } from "./hrModel";
+import SiteNav from "./SiteNav.jsx";
 
 const formatOdds = (p) => (p > 0 ? `+${p}` : `${p}`);
 const formatPct = (p, d = 1) => `${(p * 100).toFixed(d)}%`;
@@ -78,14 +79,14 @@ export default function HrParlaysPage() {
         * { box-sizing: border-box; }
       `}</style>
 
+      <SiteNav />
+
       <header style={{
         background: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 100%)",
         color: "#fff", padding: "26px 20px 20px",
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#c4b5fd" }}>
-            <Link to="/" style={{ color: "#c4b5fd", textDecoration: "none" }}>← Home</Link>
-            <span style={{ color: "#6b5ca8" }}>/</span>
             <Link to="/homeruns" style={{ color: "#c4b5fd", textDecoration: "none" }}>Home Run Hunter</Link>
             <span style={{ color: "#6b5ca8" }}>/</span>
             <span style={{ color: "#fff", fontWeight: 700 }}>Parlays</span>
@@ -101,7 +102,7 @@ export default function HrParlaysPage() {
         </div>
       </header>
 
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 14px 60px" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 14px 110px" }}>
         {/* Controls */}
         <div style={{
           background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,

@@ -6,6 +6,7 @@ import AuthModal from "./lib/AuthModal.jsx";
 import { useAuth } from "./lib/AuthContext.jsx";
 import { fetchStrategies as fetchUserStrategies } from "./lib/strategies.js";
 import { supabase } from "./lib/supabase.js";
+import SiteNav, { TAB_PATHS, tabFromPath } from "./SiteNav.jsx";
 
 async function getAuthHeader() {
   if (!supabase) return {};
@@ -14,17 +15,6 @@ async function getAuthHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ─── Tab ↔ URL mapping ────────────────────────────────
-// Keeps the browser back/forward buttons and shareable links working.
-const TAB_PATHS = { home: "/", picks: "/picks", parlays: "/parlays", games: "/games", record: "/record" };
-function tabFromPath(pathname) {
-  if (pathname === "/" || pathname === "") return "home";
-  if (pathname.startsWith("/picks")) return "picks";
-  if (pathname.startsWith("/parlays")) return "parlays";
-  if (pathname.startsWith("/games")) return "games";
-  if (pathname.startsWith("/record")) return "record";
-  return "home";
-}
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈", season: true },
@@ -1885,44 +1875,8 @@ export default function App() {
       </header>
       <AuthModal />
 
-      {/* Nav Tabs — top bar on desktop only */}
-      {!isMobile && (
-        <nav style={{
-          display: "flex",
-          gap: 0,
-          padding: "0 20px",
-          background: "#fff",
-          borderBottom: "1px solid #e2e5ea",
-        }}>
-          {[
-            { id: "home", label: "Home", icon: "🏠" },
-            { id: "picks", label: "Picks", icon: "💰" },
-            { id: "parlays", label: "Parlays", icon: "🎰" },
-            { id: "games", label: "Games", icon: "📊" },
-            { id: "record", label: "Track Record", icon: "📈" },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                flex: 1,
-                padding: "12px 0",
-                border: "none",
-                borderBottom: activeTab === tab.id ? "2px solid #1a73e8" : "2px solid transparent",
-                background: "none",
-                color: activeTab === tab.id ? "#1a73e8" : "#8b919a",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                transition: "all 0.2s",
-              }}
-            >
-              {tab.icon} {tab.label}
-            </button>
-          ))}
-        </nav>
-      )}
+      <SiteNav />
+
 
       {/* Sport Filter — only on tabs that filter by sport */}
       {["picks", "parlays", "games"].includes(activeTab) && <div style={{
@@ -3959,56 +3913,6 @@ export default function App() {
 
       {showAlertBuilder && <AlertBuilder onClose={() => setShowAlertBuilder(false)} />}
 
-      {/* ── MOBILE BOTTOM TAB BAR ── */}
-      {isMobile && (
-        <nav style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: "#1a1d23",
-          borderTop: "2px solid #2d3748",
-          display: "flex",
-          zIndex: 900,
-          padding: "8px 4px 4px",
-          paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
-          boxShadow: "0 -4px 24px rgba(0,0,0,0.25)",
-        }}>
-          {[
-            { id: "home", label: "Home", icon: "🏠" },
-            { id: "picks", label: "Picks", icon: "💰" },
-            { id: "parlays", label: "Parlays", icon: "🎰" },
-            { id: "games", label: "Games", icon: "📊" },
-            { id: "record", label: "Record", icon: "📈" },
-          ].map(tab => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  flex: 1,
-                  padding: "8px 2px 6px",
-                  border: "none",
-                  background: isActive ? "#1a73e8" : "transparent",
-                  borderRadius: 12,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 3,
-                  cursor: "pointer",
-                  color: isActive ? "#fff" : "#6b7280",
-                  transition: "all 0.2s",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                <span style={{ fontSize: 22, lineHeight: 1 }}>{tab.icon}</span>
-                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.02em" }}>{tab.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
 
       {/* ── LEGAL PAGE MODAL ── */}
       {legalPage && (
