@@ -2076,6 +2076,21 @@ export default function App() {
                   }}>
                     🏦 Book Shop
                   </Link>
+                  <Link to="/arbitrage" style={{
+                    padding: "10px 18px 10px 14px", borderRadius: 10,
+                    border: "1px solid #34d399",
+                    background: "rgba(52, 211, 153, 0.12)", color: "#34d399",
+                    fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, letterSpacing: "0.08em",
+                      background: "#34d399", color: "#064e3b",
+                      padding: "2px 6px", borderRadius: 4,
+                    }}>NEW</span>
+                    💰 Arbitrage →
+                  </Link>
                 </div>
               </div>
 

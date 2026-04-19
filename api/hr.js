@@ -793,8 +793,10 @@ async function handleDebugPropsRaw(req, res) {
   const API_KEY = process.env.PARLAY_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "PARLAY_API_KEY not configured" });
   const market = req.query?.market || "player_home_runs";
-  const url = `https://parlay-api.com/v1/sports/baseball_mlb/props`
-    + `?apiKey=${API_KEY}&markets=${market}&oddsFormat=american&limit=20`;
+  const limit = Math.max(1, Math.min(5000, parseInt(req.query?.limit, 10) || 500));
+  const sport = (req.query?.sport || "baseball_mlb").toString();
+  const url = `https://parlay-api.com/v1/sports/${encodeURIComponent(sport)}/props`
+    + `?apiKey=${API_KEY}&markets=${market}&oddsFormat=american&limit=${limit}`;
   const r = await fetch(url);
   const remaining = r.headers.get("x-requests-remaining");
   const used = r.headers.get("x-requests-used");
