@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { HelmetProvider } from 'react-helmet-async'
 import AppRoutes from './AppRoutes.jsx'
+import { AuthProvider } from './lib/AuthContext.jsx'
 import './index.css'
 
 const root = document.getElementById('root')
@@ -10,7 +11,9 @@ const app = (
   <React.StrictMode>
     <HelmetProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
     </HelmetProvider>
   </React.StrictMode>

@@ -1,5 +1,9 @@
 // Frontend POSTs current picks from each strategy.
+// If the request carries a Supabase Bearer token, picks for `custom_*`
+// strategies get tagged with the user's id so the resolver can score them
+// into per-user Redis keys.
 import { createClient } from "redis";
+import { getUserIdFromRequest } from "./_auth.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -11,6 +15,8 @@ export default async function handler(req, res) {
     if (!process.env.REDIS_URL) {
       return res.status(200).json({ saved: 0, note: "REDIS_URL not configured" });
     }
+
+    const userId = await getUserIdFromRequest(req);
 
     client = createClient({ url: process.env.REDIS_URL });
     await client.connect();
@@ -25,15 +31,15 @@ export default async function handler(req, res) {
 
     for (const pick of picks) {
       const {
-        strategy,     // "sharp" | "value" | "stale" | "rlm" | "correlated" | "narrative"
+        strategy,
         gameId,
         homeTeam,
         awayTeam,
         sportKey,
         commenceTime,
-        marketType,   // "h2h" | "spreads" | "totals"
-        outcome,      // team name or "Over"/"Under"
-        point,        // spread/total number (null for h2h)
+        marketType,
+        outcome,
+        point,
         odds,
         book,
         leg2Outcome,
@@ -43,14 +49,22 @@ export default async function handler(req, res) {
 
       if (!strategy || !gameId || !outcome) continue;
 
-      const pickId = `${strategy}:${gameId}:${outcome}:${point || ""}:${marketType}`;
+      const isCustom = typeof strategy === "string" && strategy.startsWith("custom_");
+      // Skip unauthenticated attempts to save custom-strategy picks — those
+      // must be tied to a user so the stats don't pool globally.
+      if (isCustom && !userId) continue;
 
-      // Don't save duplicate picks for the same game/outcome
+      // Per-user pick id prefix so two users who happen to pick the same side
+      // of the same game don't collide (only for custom strategies).
+      const pickPrefix = isCustom ? `u:${userId}:` : "";
+      const pickId = `${pickPrefix}${strategy}:${gameId}:${outcome}:${point || ""}:${marketType}`;
+
       const exists = await client.hGet(`pick:${pickId}`, "strategy");
       if (exists) continue;
 
       await client.hSet(`pick:${pickId}`, {
         strategy,
+        userId: isCustom ? userId : "",
         gameId,
         homeTeam: homeTeam || "",
         awayTeam: awayTeam || "",
@@ -70,7 +84,6 @@ export default async function handler(req, res) {
         result: "",
       });
 
-      // Add to pending set (scored by commence time for easy retrieval)
       await client.zAdd("pending_picks", {
         score: new Date(commenceTime).getTime(),
         value: pickId,

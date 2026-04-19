@@ -3,6 +3,7 @@ import { renderToString } from 'react-dom/server'
 import { StaticRouter } from 'react-router'
 import { HelmetProvider } from 'react-helmet-async'
 import AppRoutes from './AppRoutes.jsx'
+import { AuthProvider } from './lib/AuthContext.jsx'
 
 export function render(url) {
   const helmetContext = {}
@@ -10,7 +11,9 @@ export function render(url) {
     <React.StrictMode>
       <HelmetProvider context={helmetContext}>
         <StaticRouter location={url}>
-          <AppRoutes />
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
         </StaticRouter>
       </HelmetProvider>
     </React.StrictMode>

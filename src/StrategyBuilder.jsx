@@ -6,6 +6,9 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "./lib/AuthContext.jsx";
+import AuthModal from "./lib/AuthModal.jsx";
+import { fetchStrategies, saveStrategy, deleteStrategy } from "./lib/strategies.js";
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈" },
@@ -56,10 +59,8 @@ const LOCATIONS = [
   { id: "away", label: "Away only" },
 ];
 
-const STORAGE_KEY = "oddsy_strategies";
-
 const DEFAULT_STRATEGY = () => ({
-  id: cryptoId(),
+  id: null,
   name: "My Strategy",
   sports: ["americanfootball_nfl", "basketball_nba"],
   markets: ["spreads", "totals"],
@@ -74,28 +75,6 @@ const DEFAULT_STRATEGY = () => ({
   books: [],
   createdAt: new Date().toISOString(),
 });
-
-function cryptoId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID().slice(0, 8);
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function loadStrategies() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStrategies(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {}
-}
 
 // ─── Odds math ──────────────────────────────────────
 const impliedProb = (odds) => {
@@ -232,27 +211,35 @@ function Section({ title, children }) {
 export default function StrategyBuilder() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const { user, loading: authLoading, setShowAuthModal } = useAuth();
 
-  const [strategies, setStrategies] = useState(() => loadStrategies());
+  const [strategies, setStrategies] = useState([]);
+  const [strategiesLoaded, setStrategiesLoaded] = useState(false);
   const [form, setForm] = useState(null);
   const [games, setGames] = useState([]);
   const [loadingOdds, setLoadingOdds] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
-  // Initialize form based on URL param
+  // Load the signed-in user's strategies from Supabase
   useEffect(() => {
-    if (!id) {
-      setForm(null);
-      return;
-    }
-    if (id === "new") {
-      setForm(DEFAULT_STRATEGY());
-      return;
-    }
+    if (!user) { setStrategies([]); setStrategiesLoaded(false); return; }
+    let cancelled = false;
+    fetchStrategies().then(list => {
+      if (!cancelled) { setStrategies(list); setStrategiesLoaded(true); }
+    });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Initialize form based on URL param (wait for strategies to load first)
+  useEffect(() => {
+    if (!id) { setForm(null); return; }
+    if (id === "new") { setForm(DEFAULT_STRATEGY()); return; }
+    if (!strategiesLoaded) return;
     const existing = strategies.find(s => s.id === id);
     if (existing) setForm({ ...existing });
     else setForm(DEFAULT_STRATEGY());
-  }, [id]);
+  }, [id, strategiesLoaded]);
 
   // Fetch live odds (same cache key as main app — no duplicate request)
   useEffect(() => {
@@ -289,24 +276,35 @@ export default function StrategyBuilder() {
     return evaluateStrategy(form, games);
   }, [form, games]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form || !form.name?.trim()) return;
-    const list = loadStrategies();
-    const idx = list.findIndex(s => s.id === form.id);
-    const next = idx >= 0 ? list.map((s, i) => (i === idx ? form : s)) : [...list, form];
-    saveStrategies(next);
-    setStrategies(next);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+    setSaveError(null);
+    try {
+      const saved = await saveStrategy(form);
+      setForm({ ...saved });
+      const next = await fetchStrategies();
+      setStrategies(next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+      // Keep the URL in sync with the server-generated id
+      if (!form.id || form.id !== saved.id) {
+        navigate(`/strategy-builder/${saved.id}`, { replace: true });
+      }
+    } catch (err) {
+      setSaveError(err.message || "Couldn't save");
+    }
   };
 
-  const handleDelete = () => {
-    if (!form) return;
+  const handleDelete = async () => {
+    if (!form || !form.id) { navigate("/strategy-builder"); return; }
     if (!confirm(`Delete strategy "${form.name}"?`)) return;
-    const next = loadStrategies().filter(s => s.id !== form.id);
-    saveStrategies(next);
-    setStrategies(next);
-    navigate("/strategy-builder");
+    try {
+      await deleteStrategy(form.id);
+      setStrategies(s => s.filter(x => x.id !== form.id));
+      navigate("/strategy-builder");
+    } catch (err) {
+      setSaveError(err.message || "Couldn't delete");
+    }
   };
 
   const updateForm = (patch) => setForm(f => ({ ...f, ...patch }));
@@ -316,6 +314,31 @@ export default function StrategyBuilder() {
       return { ...f, [field]: arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value] };
     });
   };
+
+  // ─── AUTH GATE ──────────────────────────────────
+  if (!authLoading && !user) {
+    return (
+      <Shell>
+        <AuthModal />
+        <div style={{ padding: "40px 8px", textAlign: "center" }}>
+          <h1 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 900, color: "#1a1d23" }}>
+            Sign in to build strategies
+          </h1>
+          <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5, marginBottom: 18, maxWidth: 360, margin: "0 auto 18px" }}>
+            Your custom strategies are tied to your account so you can access them from any device and track their performance over time.
+          </div>
+          <button onClick={() => setShowAuthModal(true)} style={{
+            padding: "11px 22px", borderRadius: 10, border: "none",
+            background: "#1a73e8", color: "#fff", fontSize: 14, fontWeight: 800,
+            cursor: "pointer", fontFamily: "inherit",
+          }}>Sign in / Create account</button>
+          <div style={{ marginTop: 18 }}>
+            <Link to="/" style={{ fontSize: 12, color: "#8b919a", textDecoration: "none" }}>← Back to home</Link>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
 
   // ─── LIST VIEW ──────────────────────────────────
   if (!form) {
@@ -534,6 +557,9 @@ export default function StrategyBuilder() {
               }}>Delete</button>
             )}
           </div>
+          {saveError && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626" }}>{saveError}</div>
+          )}
         </div>
 
         {/* Preview */}

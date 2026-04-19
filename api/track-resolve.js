@@ -1,6 +1,7 @@
 // Cron job: checks finished games and resolves pending picks.
 // Runs daily at 6 AM UTC via Vercel Cron.
 import { createClient } from "redis";
+import { statsKey } from "./_auth.js";
 
 // 1-unit flat stake. Win profit = decimal odds - 1. Loss = -1. Push = 0.
 function unitsOnWin(oddsStr) {
@@ -198,14 +199,15 @@ export default async function handler(req, res) {
           unitProfit: unitProfit.toFixed(4),
         });
 
-        // Update strategy stats
-        const statsKey = `stats:${pick.strategy}`;
-        await client.hIncrBy(statsKey, "total", 1);
-        await client.hIncrBy(statsKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
-        await client.hIncrByFloat(statsKey, "units", unitProfit);
+        // Update strategy stats (scoped per-user for custom_*, global for built-ins)
+        const userId = pick.userId || null;
+        const sKey = statsKey(pick.strategy, userId);
+        await client.hIncrBy(sKey, "total", 1);
+        await client.hIncrBy(sKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
+        await client.hIncrByFloat(sKey, "units", unitProfit);
 
-        // Update daily stats
-        const dailyKey = `stats:${pick.strategy}:${pick.date}`;
+        // Update daily stats (same scoping rule)
+        const dailyKey = `${sKey}:${pick.date}`;
         await client.hIncrBy(dailyKey, "total", 1);
         await client.hIncrBy(dailyKey, result === "win" ? "wins" : result === "loss" ? "losses" : "pushes", 1);
         await client.hIncrByFloat(dailyKey, "units", unitProfit);

@@ -1,19 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { evaluateStrategy } from "./StrategyBuilder.jsx";
+import UserMenu from "./lib/UserMenu.jsx";
+import AuthModal from "./lib/AuthModal.jsx";
+import { useAuth } from "./lib/AuthContext.jsx";
+import { fetchStrategies as fetchUserStrategies } from "./lib/strategies.js";
+import { supabase } from "./lib/supabase.js";
 
-// Custom-strategy storage keys (mirrored here so we can read without importing state)
-const CUSTOM_STRATEGIES_KEY = "oddsy_strategies";
-const loadCustomStrategies = () => {
-  try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(CUSTOM_STRATEGIES_KEY) : null;
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-};
+async function getAuthHeader() {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 // ─── Tab ↔ URL mapping ────────────────────────────────
 // Keeps the browser back/forward buttons and shareable links working.
@@ -1268,6 +1267,11 @@ export default function App() {
   const routeParams = useParams();
   const activeTab = tabFromPath(location.pathname);
   const setActiveTab = (tab) => navigate(TAB_PATHS[tab] || "/");
+  const { user, setShowAuthModal } = useAuth();
+  const openStrategyBuilder = () => {
+    if (user) navigate("/strategy-builder");
+    else setShowAuthModal(true);
+  };
 
   // URL-driven sub-views so the browser back button works between filters.
   const PICK_FILTERS = new Set(["all", "sharp", "value", "stale", "rlm", "narrative"]);
@@ -1301,6 +1305,18 @@ export default function App() {
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [strategyStats, setStrategyStats] = useState({});
   const [resolvedPicks, setResolvedPicks] = useState([]);
+  const [customStrategiesList, setCustomStrategiesList] = useState([]);
+
+  // Load the signed-in user's custom strategies so we can display their names
+  // in the Track Record tab.
+  useEffect(() => {
+    if (!user) { setCustomStrategiesList([]); return; }
+    let cancelled = false;
+    fetchUserStrategies().then(list => {
+      if (!cancelled) setCustomStrategiesList(list);
+    });
+    return () => { cancelled = true; };
+  }, [user]);
   // Record period lives in the URL (?period=7|30|all) so the browser back
   // button walks period changes and each period is a shareable link.
   const recordPeriod = (() => {
@@ -1448,26 +1464,37 @@ export default function App() {
     if (valueBets.length > 0) setParlays(generateParlays(valueBets));
   }, [parlayKey]);
 
-  // Fetch strategy performance stats
+  // Fetch strategy performance stats. Refetches when auth changes so the
+  // signed-in user's custom stats replace the anonymous view.
   useEffect(() => {
-    fetch("/api/track-stats")
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.stats) setStrategyStats(data.stats); })
-      .catch(() => {});
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const headers = user ? await getAuthHeader() : {};
+      fetch("/api/track-stats", { headers })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (!cancelled && data?.stats) setStrategyStats(data.stats); })
+        .catch(() => {});
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Fetch individual resolved picks — powers the Record tab drill-down
-  // and period filtering. Only loaded once when the Record tab is first
-  // opened to avoid scanning all pick:* keys on every page load.
-  const picksLoadedRef = useRef(false);
+  // and period filtering. Refetches when auth changes so the user sees
+  // their own custom-strategy picks.
+  const picksLoadedRef = useRef(null);
   useEffect(() => {
-    if (activeTab !== "record" || picksLoadedRef.current) return;
-    picksLoadedRef.current = true;
-    fetch("/api/track-picks")
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.picks) setResolvedPicks(data.picks); })
-      .catch(() => {});
-  }, [activeTab]);
+    if (activeTab !== "record") return;
+    const authKey = user?.id || "anon";
+    if (picksLoadedRef.current === authKey) return;
+    picksLoadedRef.current = authKey;
+    (async () => {
+      const headers = user ? await getAuthHeader() : {};
+      fetch("/api/track-picks", { headers })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.picks) setResolvedPicks(data.picks); })
+        .catch(() => {});
+    })();
+  }, [activeTab, user]);
 
   // POST picks to tracking API when data is ready (once per session)
   useEffect(() => {
@@ -1551,30 +1578,6 @@ export default function App() {
       book: p.bestBook,
     }));
 
-    // Custom user-defined strategies (from localStorage). Each strategy is
-    // evaluated against the live odds using the same logic the builder shows,
-    // and matching picks are saved under `custom_<id>` so they accumulate a
-    // track record in the same Redis store as the built-ins.
-    try {
-      const customStrategies = loadCustomStrategies();
-      customStrategies.forEach(strat => {
-        const matches = evaluateStrategy(strat, games);
-        matches.forEach(m => picks.push({
-          strategy: `custom_${strat.id}`,
-          gameId: m.game.id,
-          homeTeam: m.game.home_team,
-          awayTeam: m.game.away_team,
-          sportKey: m.game.sport_key,
-          commenceTime: m.game.commence_time || m.commence,
-          marketType: m.marketType,
-          outcome: m.outcome,
-          point: m.point ?? null,
-          odds: m.odds,
-          book: m.book || "",
-        }));
-      });
-    } catch {}
-
     if (picks.length > 0) {
       fetch("/api/track-save", {
         method: "POST",
@@ -1583,6 +1586,46 @@ export default function App() {
       }).catch(() => {});
     }
   }, [sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
+
+  // Custom user-defined strategies — only run for the signed-in user. Each
+  // strategy is evaluated against the live odds and matching picks are saved
+  // under `custom_<id>` with the user's auth token so the server can scope
+  // Redis stats keys by user.
+  useEffect(() => {
+    if (!user || games.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const customStrategies = await fetchUserStrategies();
+        if (cancelled || !customStrategies.length) return;
+        const picks = [];
+        customStrategies.forEach(strat => {
+          const matches = evaluateStrategy(strat, games);
+          matches.forEach(m => picks.push({
+            strategy: `custom_${strat.id}`,
+            gameId: m.game.id,
+            homeTeam: m.game.home_team,
+            awayTeam: m.game.away_team,
+            sportKey: m.game.sport_key,
+            commenceTime: m.game.commence_time || m.commence,
+            marketType: m.marketType,
+            outcome: m.outcome,
+            point: m.point ?? null,
+            odds: m.odds,
+            book: m.book || "",
+          }));
+        });
+        if (cancelled || !picks.length) return;
+        const authHeader = await getAuthHeader();
+        await fetch("/api/track-save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeader },
+          body: JSON.stringify({ picks }),
+        });
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [user, games, sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
 
   const filteredGames = games.filter(g => {
     const sportMatch = activeSport === "all" || g.sport_key === activeSport;
@@ -1633,16 +1676,20 @@ export default function App() {
           >
             <img src="/logo.jpeg" alt="MyOddsy — Sports Odds & Analytics" style={{ height: 80, display: "block", maxWidth: "75vw" }} />
           </button>
-          <button
-            onClick={() => setShowAlertBuilder(true)}
-            aria-label="Create alert"
-            style={{
-              background: "#f0f1f3", border: "1px solid #e2e5ea", borderRadius: 10,
-              padding: "8px 10px", cursor: "pointer", fontSize: 18, lineHeight: 1,
-            }}
-          >🔔</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowAlertBuilder(true)}
+              aria-label="Create alert"
+              style={{
+                background: "#f0f1f3", border: "1px solid #e2e5ea", borderRadius: 10,
+                padding: "8px 10px", cursor: "pointer", fontSize: 18, lineHeight: 1,
+              }}
+            >🔔</button>
+            <UserMenu />
+          </div>
         </div>
       </header>
+      <AuthModal />
 
       {/* Nav Tabs — top bar on desktop only */}
       {!isMobile && (
@@ -1796,7 +1843,7 @@ export default function App() {
                   }}>
                     Track Record
                   </button>
-                  <button onClick={() => navigate("/strategy-builder")} style={{
+                  <button onClick={openStrategyBuilder} style={{
                     padding: "10px 20px", borderRadius: 10,
                     border: "1px solid rgba(255,255,255,0.2)",
                     background: "transparent", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
@@ -2042,7 +2089,7 @@ export default function App() {
                     Every bet with a statistical edge, ranked by strength. Tap a chip to filter by strategy.
                   </div>
                 </div>
-                <button onClick={() => navigate("/strategy-builder")} style={{
+                <button onClick={openStrategyBuilder} style={{
                   flexShrink: 0, padding: "8px 12px", borderRadius: 8,
                   border: "1px solid #1a73e8", background: "#fff", color: "#1a73e8",
                   fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
@@ -2705,11 +2752,10 @@ export default function App() {
               desc: "Fade the overreaction after a blowout loss." },
           ];
 
-          // Build dynamic rows for the user's custom strategies — named from
-          // localStorage, but also surface rows for any `custom_*` strategy
-          // that has picks in Redis even if the local definition was deleted.
-          const customStrategies = loadCustomStrategies();
-          const customById = new Map(customStrategies.map(s => [s.id, s]));
+          // Build dynamic rows for the signed-in user's custom strategies, plus
+          // any `custom_*` strategy that still has picks in Redis even if the
+          // local definition was deleted.
+          const customById = new Map(customStrategiesList.map(s => [s.id, s]));
           const customIdsFromPicks = new Set(
             (resolvedPicks || [])
               .map(p => p.strategy)

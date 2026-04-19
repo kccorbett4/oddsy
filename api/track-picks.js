@@ -1,7 +1,11 @@
 // Returns all resolved picks (settled as win/loss/push). Front-end uses
 // this to filter by strategy + time period and to show per-pick history
 // in the Track Record drill-down.
+// Built-in strategies (sharp/value/stale/rlm/correlated/narrative) are shared;
+// custom_* picks are only returned to their owner (or dropped entirely for
+// anonymous requests).
 import { createClient } from "redis";
+import { getUserIdFromRequest } from "./_auth.js";
 
 function unitsOnWin(oddsStr) {
   const odds = parseFloat(oddsStr);
@@ -15,6 +19,8 @@ export default async function handler(req, res) {
     if (!process.env.REDIS_URL) {
       return res.status(200).json({ picks: [], note: "REDIS_URL not configured" });
     }
+
+    const userId = await getUserIdFromRequest(req);
 
     client = createClient({ url: process.env.REDIS_URL });
     await client.connect();
@@ -30,6 +36,12 @@ export default async function handler(req, res) {
         const p = await client.hGetAll(key);
         if (!p || p.resolved !== "true") continue;
         if (!["win", "loss", "push"].includes(p.result)) continue;
+
+        // Filter custom picks: only the owner sees them.
+        const isCustom = typeof p.strategy === "string" && p.strategy.startsWith("custom_");
+        if (isCustom) {
+          if (!userId || !p.userId || p.userId !== userId) continue;
+        }
 
         // Prefer stored unitProfit; fall back to computing from odds
         // so picks resolved before unitProfit tracking was added still
@@ -75,7 +87,7 @@ export default async function handler(req, res) {
       return tb - ta;
     });
 
-    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "private, s-maxage=60, stale-while-revalidate=60");
     return res.status(200).json({ picks, scanned });
   } catch (err) {
     return res.status(200).json({ picks: [], error: err.message });
