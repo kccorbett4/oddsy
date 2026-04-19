@@ -205,19 +205,25 @@ const analyzeParlay = (legs) => {
   const ev = (fairProbProduct * (combinedDecimal - 1) - (1 - fairProbProduct)) * 100;
   const sameGameSet = new Set(legs.map(l => l.gameId));
   const hasSameGame = sameGameSet.size < legs.length;
+  // Parlays are structurally -EV: each leg carries ~2–3% residual juice even
+  // at best-line consensus, and it compounds multiplicatively. A "par" parlay
+  // of N legs lands around -2.5% × N. We grade against that baseline, not 0,
+  // so typical parlays don't all scream "avoid".
+  const parEV = -2.5 * legs.length;
+  const edge = ev - parEV; // how much better/worse than an average parlay this size
   let verdict, verdictColor, verdictDetail;
-  if (ev >= 5) {
+  if (ev >= 0) {
     verdict = "Strong +EV"; verdictColor = "#0d9f4f";
-    verdictDetail = "The market consensus suggests this parlay pays more than it should. Real edge.";
-  } else if (ev >= 0) {
-    verdict = "Slight edge"; verdictColor = "#1a73e8";
-    verdictDetail = "Marginally profitable by the vig-free market. Edge is thin — watch for line movement.";
-  } else if (ev >= -5) {
-    verdict = "Near break-even"; verdictColor = "#e8a100";
-    verdictDetail = "Typical casual parlay — you're paying modest juice, not a disaster.";
+    verdictDetail = `The vig-free market says this pays more than it should. Rare — most parlays sit around ${parEV.toFixed(0)}% EV; this one is actually profitable.`;
+  } else if (edge >= 4) {
+    verdict = "Above average"; verdictColor = "#1a73e8";
+    verdictDetail = `Par for a ${legs.length}-leg parlay is about ${parEV.toFixed(0)}% EV. Yours is ${edge.toFixed(1)} points better — still negative, but sharper than a typical ticket this size.`;
+  } else if (edge >= -3) {
+    verdict = "Typical parlay"; verdictColor = "#e8a100";
+    verdictDetail = `A ${legs.length}-leg parlay at best lines naturally sits near ${parEV.toFixed(0)}% EV from compounding juice. This is market-rate — you're paying normal parlay tax, not getting fleeced.`;
   } else {
     verdict = "Poor value"; verdictColor = "#dc2626";
-    verdictDetail = "The book is charging significantly more than the fair price. Avoid.";
+    verdictDetail = `Even for a ${legs.length}-leg parlay (baseline ${parEV.toFixed(0)}% EV), this is ${Math.abs(edge).toFixed(1)} points worse. One or more legs is badly priced — swap or skip.`;
   }
   return {
     legCount: legs.length,
@@ -226,6 +232,8 @@ const analyzeParlay = (legs) => {
     impliedProb,
     fairProb: fairProbProduct,
     ev,
+    parEV,
+    edge,
     hasSameGame,
     verdict,
     verdictColor,
@@ -3044,9 +3052,7 @@ export default function App() {
                   }
                   return (
                   <div style={{ maxHeight: 360, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {filtered
-                      .slice(0, 40)
-                      .map(game => {
+                    {filtered.map(game => {
                         const gameHasLeg = analyzerLegs.some(l => l.gameId === game.id);
                         return (
                           <div key={game.id} style={{
