@@ -611,6 +611,45 @@ async function handleBvp(req, res) {
   }
 }
 
+// ──────────────────────── coverage diagnostic ────────────────────────
+// One-shot probe: "which books does my Odds API plan actually return for
+// MLB, across H2H (main market — every book posts this) vs player props?"
+// Useful for figuring out whether DK/FanDuel/BetMGM are missing because
+// of a plan-tier limit on props, or because the plan doesn't include
+// those books at all.
+async function handleCoverage(req, res) {
+  const API_KEY = process.env.ODDS_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+
+  const regions = "us,us2";
+  const h2hUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds`
+    + `?apiKey=${API_KEY}&regions=${regions}&markets=h2h&oddsFormat=american`;
+  const r = await fetch(h2hUrl);
+  const remaining = r.headers.get("x-requests-remaining");
+  const used = r.headers.get("x-requests-used");
+  if (!r.ok) {
+    return res.status(502).json({ error: `Odds API returned ${r.status}`, body: await r.text() });
+  }
+  const data = await r.json();
+  const perEvent = data.map(e => ({
+    home: e.home_team, away: e.away_team,
+    bookmakers: (e.bookmakers || []).map(b => b.title),
+  }));
+  const allBooks = {};
+  for (const ev of perEvent) {
+    for (const b of ev.bookmakers) allBooks[b] = (allBooks[b] || 0) + 1;
+  }
+  return res.status(200).json({
+    regions, market: "h2h", eventCount: data.length,
+    creditsRemaining: remaining, creditsUsed: used,
+    booksByCoverage: Object.fromEntries(
+      Object.entries(allBooks).sort((a, b) => b[1] - a[1])
+    ),
+    totalBooks: Object.keys(allBooks).length,
+    note: "If DraftKings/FanDuel/BetMGM appear here but are missing from the HR props feed (/api/hr?action=odds), it's a plan-tier limit on player-prop markets. If they're missing here too, your plan doesn't include those books at all.",
+  });
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -618,6 +657,7 @@ export default async function handler(req, res) {
     if (action === "context") return await handleContext(req, res);
     if (action === "odds") return await handleOdds(req, res);
     if (action === "bvp") return await handleBvp(req, res);
+    if (action === "coverage") return await handleCoverage(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
