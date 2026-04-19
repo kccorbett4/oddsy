@@ -933,6 +933,80 @@ const BookLink = ({ book, style, prefix = "", suffix = "" }) => {
   );
 };
 
+// Small "i" icon that reveals every book's price for an outcome on hover/tap.
+// Pass the raw game object + the market coordinates (outcome name, point) so
+// we can pull offers across every bookmaker.
+const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
+  const [open, setOpen] = useState(false);
+  if (!game || !marketType || !outcome) return null;
+  const { perOutcomeOffers } = collectMarketFairProbs(game, marketType);
+  const pointStr = point === null || point === undefined ? "" : `${point}`;
+  const offers = perOutcomeOffers[`${outcome}_${pointStr}`] || perOutcomeOffers[`${outcome}_`] || [];
+  if (offers.length === 0) return null;
+  const sorted = [...offers].sort((a, b) => b.price - a.price);
+  const toggle = (e) => { e.stopPropagation(); e.preventDefault(); setOpen(v => !v); };
+  return (
+    <span
+      style={{ position: "relative", display: "inline-block", marginLeft: 4, verticalAlign: "middle" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <span
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        aria-label="Show all books"
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 13, height: 13, borderRadius: "50%",
+          border: "1px solid #cbd5e0", background: "#fff",
+          fontSize: 9, fontWeight: 800, color: "#6b7280",
+          cursor: "help", fontStyle: "italic", lineHeight: 1,
+        }}
+      >
+        i
+      </span>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute", right: 0, top: "calc(100% + 4px)",
+            zIndex: 1000,
+            background: "#fff", border: "1px solid #e2e5ea",
+            borderRadius: 8, padding: "8px 10px",
+            boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+            minWidth: 150, whiteSpace: "nowrap",
+            textAlign: "left",
+          }}
+        >
+          <div style={{
+            fontSize: 9, fontWeight: 800, color: "#6b7280",
+            textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6,
+          }}>
+            All Books ({sorted.length})
+          </div>
+          {sorted.map((o, i) => {
+            const isBest = o.book === bestBook || (!bestBook && i === 0);
+            return (
+              <div key={o.book} style={{
+                display: "flex", justifyContent: "space-between", gap: 14,
+                padding: "2px 0", fontSize: 11,
+                color: isBest ? "#0d9f4f" : "#4a5568",
+                fontWeight: isBest ? 700 : 500,
+              }}>
+                <span>{o.book}{isBest ? " ★" : ""}</span>
+                <span style={{ fontFamily: "'Space Mono', monospace" }}>
+                  {o.price > 0 ? `+${o.price}` : o.price}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </span>
+  );
+};
+
 const Pill = ({ active, onClick, children, accent }) => (
   <button
     onClick={onClick}
@@ -1226,12 +1300,12 @@ const ValueBetCard = ({ bet, index }) => {
 };
 
 const OddsRow = ({ game }) => {
-  const bestH2H = { home: { odds: -Infinity, book: "" }, away: { odds: -Infinity, book: "" } };
+  const bestH2H = { home: { odds: -Infinity, book: "", name: "" }, away: { odds: -Infinity, book: "", name: "" } };
   game.bookmakers.forEach(b => {
     const h2h = b.markets.find(m => m.key === "h2h");
     if (!h2h) return;
-    if (h2h.outcomes[0]?.price > bestH2H.home.odds) { bestH2H.home = { odds: h2h.outcomes[0].price, book: b.title }; }
-    if (h2h.outcomes[1]?.price > bestH2H.away.odds) { bestH2H.away = { odds: h2h.outcomes[1].price, book: b.title }; }
+    if (h2h.outcomes[0]?.price > bestH2H.home.odds) { bestH2H.home = { odds: h2h.outcomes[0].price, book: b.title, name: h2h.outcomes[0].name }; }
+    if (h2h.outcomes[1]?.price > bestH2H.away.odds) { bestH2H.away = { odds: h2h.outcomes[1].price, book: b.title, name: h2h.outcomes[1].name }; }
   });
 
   return (
@@ -1264,8 +1338,9 @@ const OddsRow = ({ game }) => {
         <div style={{ color: "#1a73e8", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.away.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "#8b919a" }}>
+        <div style={{ fontSize: 9, color: "#8b919a", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <BookLink book={bestH2H.away.book} />
+          <AllBooksTooltip game={game} marketType="h2h" outcome={bestH2H.away.name} point={null} bestBook={bestH2H.away.book} />
         </div>
       </div>
       <div style={{ textAlign: "center", minWidth: 65 }}>
@@ -1273,8 +1348,9 @@ const OddsRow = ({ game }) => {
         <div style={{ color: "#0d9f4f", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.home.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "#8b919a" }}>
+        <div style={{ fontSize: 9, color: "#8b919a", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <BookLink book={bestH2H.home.book} />
+          <AllBooksTooltip game={game} marketType="h2h" outcome={bestH2H.home.name} point={null} bestBook={bestH2H.home.book} />
         </div>
       </div>
     </div>
@@ -1940,18 +2016,21 @@ export default function App() {
             title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
             game: `${p.game.away_team} @ ${p.game.home_team}`,
             odds: p.odds, book: p.book, edge: parseFloat(p.ev || 0),
+            rawGame: p.game, marketType: p.marketType, outcome: p.outcome, point: p.point,
           }));
           const valueTop = valueBets.slice(0, 3).map(p => ({
             kind: "value", label: "Value", color: "#0d9f4f",
             title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
             game: `${p.game.away_team} @ ${p.game.home_team}`,
             odds: p.odds, book: p.book, edge: parseFloat(p.ev || 0),
+            rawGame: p.game, marketType: p.marketType, outcome: p.outcome, point: p.point,
           }));
           const staleTop = staleLines.slice(0, 2).map(p => ({
             kind: "stale", label: "Stale Line", color: "#dc2626",
             title: `${p.outcome}${p.point ? ` (${p.point > 0 ? "+" : ""}${p.point})` : ""}`,
             game: `${p.game.away_team} @ ${p.game.home_team}`,
             odds: p.staleOdds, book: p.staleBook, edge: parseFloat(p.diff || 0),
+            rawGame: p.game, marketType: p.marketType, outcome: p.outcome, point: p.point,
           }));
           const merged = [...sharpTop, ...valueTop, ...staleTop].sort((a, b) => b.edge - a.edge).slice(0, 3);
           const totalPlays = sharpPlays.length + valueBets.length + staleLines.length + rlmPlays.length + narrativePlays.length;
@@ -2188,8 +2267,9 @@ export default function App() {
                           <div style={{ fontSize: 16, fontWeight: 800, color: m.odds > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace" }}>
                             {formatOdds(m.odds)}
                           </div>
-                          <div style={{ fontSize: 10, color: "#8b919a" }}>
+                          <div style={{ fontSize: 10, color: "#8b919a", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                             <BookLink book={m.book} />
+                            <AllBooksTooltip game={m.rawGame} marketType={m.marketType} outcome={m.outcome} point={m.point} bestBook={m.book} />
                           </div>
                         </div>
                       </button>
@@ -2280,6 +2360,7 @@ export default function App() {
             marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
             game: p.game, commence: p.commence,
             odds: p.odds, book: p.book,
+            marketType: p.marketType, outcome: p.outcome, point: p.point,
             sortKey: p.totalScore || parseFloat(p.ev || 0),
             edgeLabel: `+${p.ev}% EV`,
           }));
@@ -2290,6 +2371,7 @@ export default function App() {
             marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
             game: p.game, commence: p.game.commence_time,
             odds: p.odds, book: p.book,
+            marketType: p.marketType, outcome: p.outcome, point: p.point,
             sortKey: parseFloat(p.ev || 0),
             edgeLabel: `+${p.ev}% EV`,
           }));
@@ -2300,6 +2382,7 @@ export default function App() {
             marketLabel: p.marketType === "h2h" ? "Moneyline" : p.marketType === "spreads" ? "Spread" : "Total",
             game: p.game, commence: p.commence,
             odds: p.staleOdds, book: p.staleBook,
+            marketType: p.marketType, outcome: p.outcome, point: p.point,
             sortKey: parseFloat(p.diff || 0) * 10,
             edgeLabel: `${p.diff} pts off market`,
           }));
@@ -2310,6 +2393,7 @@ export default function App() {
             marketLabel: p.marketType === "h2h" ? "Moneyline" : "Spread",
             game: p.game, commence: p.commence,
             odds: p.bestOdds, book: p.bestBook,
+            marketType: p.marketType, outcome: p.outcome, point: p.point,
             sortKey: parseFloat(p.lineRange || 0) * 5,
             edgeLabel: `${p.lineRange} pts spread`,
           }));
@@ -2320,6 +2404,7 @@ export default function App() {
             marketLabel: "Spread",
             game: p.game, commence: p.commence,
             odds: p.bestOdds, book: p.bestBook,
+            marketType: "spreads", outcome: p.blowoutTeam, point: p.bestSpread,
             sortKey: Math.abs(p.blowoutInfo.margin || 0),
             edgeLabel: `+${p.bestSpread} spread`,
           }));
@@ -2518,8 +2603,9 @@ export default function App() {
                           }}>
                             {formatOdds(p.odds)}
                           </div>
-                          <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 4 }}>
+                          <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                             <BookLink book={p.book} />
+                            <AllBooksTooltip game={p.game} marketType={p.marketType} outcome={p.outcome} point={p.point} bestBook={p.book} />
                           </div>
                           <div style={{
                             fontSize: 10, fontWeight: 700, color: p.color,
@@ -2827,8 +2913,11 @@ export default function App() {
                             <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1d23", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {leg.outcome} {leg.point ? `(${leg.point > 0 ? '+' : ''}${leg.point})` : ''}
                             </div>
-                            <div style={{ fontSize: 10, color: "#8b919a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {leg.game.away_team} @ {leg.game.home_team} · Best odds: <BookLink book={leg.book} style={{ color: "#1a73e8", fontWeight: 600 }} />
+                            <div style={{ fontSize: 10, color: "#8b919a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 2 }}>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {leg.game.away_team} @ {leg.game.home_team} · Best odds: <BookLink book={leg.book} style={{ color: "#1a73e8", fontWeight: 600 }} />
+                              </span>
+                              <AllBooksTooltip game={leg.game} marketType={leg.marketType} outcome={leg.outcome} point={leg.point} bestBook={leg.book} />
                             </div>
                           </div>
                         </div>
@@ -3145,6 +3234,7 @@ export default function App() {
             setAnalyzerLegs([...analyzerLegs, {
               id: legId,
               gameId: game.id,
+              game,
               homeTeam: game.home_team,
               awayTeam: game.away_team,
               sportKey: game.sport_key,
@@ -3354,8 +3444,9 @@ export default function App() {
                               {leg.outcome}{pointStr}{" "}
                               <span style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700 }}>{mt}</span>
                             </div>
-                            <div style={{ fontSize: 10, color: "#8b919a", marginTop: 2 }}>
-                              {leg.awayTeam} @ {leg.homeTeam} · <BookLink book={leg.book} style={{ fontSize: 10 }} /> · fair {(leg.fairProb * 100).toFixed(1)}%
+                            <div style={{ fontSize: 10, color: "#8b919a", marginTop: 2, display: "flex", alignItems: "center", gap: 2 }}>
+                              <span>{leg.awayTeam} @ {leg.homeTeam} · <BookLink book={leg.book} style={{ fontSize: 10 }} /> · fair {(leg.fairProb * 100).toFixed(1)}%</span>
+                              <AllBooksTooltip game={leg.game} marketType={leg.marketType} outcome={leg.outcome} point={leg.point} bestBook={leg.book} />
                             </div>
                           </div>
                           <div style={{ textAlign: "right", flexShrink: 0 }}>
