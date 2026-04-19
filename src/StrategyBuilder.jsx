@@ -76,30 +76,31 @@ const NOTIFY_MODES = [
 const DEFAULT_STRATEGY = () => ({
   id: null,
   name: "My Strategy",
-  // Start wide-open — every sport, every market, no thresholds. Users narrow
-  // down from here. (Previously defaulted to NFL+NBA / spreads+totals / 2% EV /
-  // 3+ books, which silently pre-filtered results.)
+  // Start wide-open — every sport, every market, all sliders at their most
+  // permissive end. Users narrow down from here. Values must stay within
+  // the slider widgets' min/max bounds or the browser clamps them, silently
+  // reintroducing a filter. See the slider definitions below for ranges.
   sports: SPORTS.map(s => s.id),
   markets: MARKETS.map(m => m.id),
-  minEv: 0,
-  minBooks: 1,
-  minOdds: -10000,
-  maxOdds: 10000,
+  minEv: 0,             // slider 0–20
+  minBooks: 1,          // slider 1–6
+  minOdds: -2000,       // slider -2000–0 (≤-2000 displays "any")
+  maxOdds: 2000,        // slider 100–2000 (≥2000 displays "any")
   side: "any",
   location: "any",
-  maxPicksPerDay: 50,
-  hoursWindow: 168,
+  maxPicksPerDay: 100,  // slider 1–100 (100 displays "unlimited")
+  hoursWindow: 168,     // slider 2–168
   books: [],
-  totalMin: 0,
-  totalMax: 500,
-  spreadMin: 0,
-  spreadMax: 100,
+  totalMin: 0,          // slider 0–300
+  totalMax: 300,
+  spreadMin: 0,         // slider 0–30
+  spreadMax: 30,
   daysOfWeek: [],
   timeOfDay: "any",
   minBookDisagreement: 0,
   minHoursUntilTip: 0,
   excludePrimetime: false,
-  maxVigPct: 100,
+  maxVigPct: 50,        // slider 3–50 (50 displays "any")
   // Game-context filters — each has a tri-state mode (off / skip / only)
   // + a threshold (ignored for boolean filters). "skip" rejects games where
   // the condition is met; "only" requires the condition. Mix & match to
@@ -748,8 +749,8 @@ export default function StrategyBuilder() {
                 onChange={e => updateForm({ minEv: parseFloat(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Min books offering: ${form.minBooks}`} info="How many sportsbooks must price the same line before we trust the market average. More books = more reliable consensus, fewer matches.">
-              <input type="range" min="2" max="6" step="1"
+            <Section title={`Min books offering: ${form.minBooks}`} info="How many sportsbooks must price the same line before we trust the market average. 1 = any book. Higher = stricter consensus.">
+              <input type="range" min="1" max="6" step="1"
                 value={form.minBooks}
                 onChange={e => updateForm({ minBooks: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
@@ -757,14 +758,14 @@ export default function StrategyBuilder() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Min odds: ${fmtOdds(form.minOdds)}`} info="Cheapest odds you'll accept. -250 means you won't bet a favorite priced steeper than -250 (too low payout).">
-              <input type="range" min="-500" max="0" step="10"
+            <Section title={`Min odds: ${form.minOdds <= -2000 ? "any" : fmtOdds(form.minOdds)}`} info="Cheapest odds you'll accept. Drag all the way left for no floor.">
+              <input type="range" min="-2000" max="0" step="10"
                 value={form.minOdds}
                 onChange={e => updateForm({ minOdds: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Max odds: ${fmtOdds(form.maxOdds)}`} info="Biggest longshot you'll consider. +300 means no underdogs priced above +300 (too unlikely to hit).">
-              <input type="range" min="100" max="700" step="10"
+            <Section title={`Max odds: ${form.maxOdds >= 2000 ? "any" : fmtOdds(form.maxOdds)}`} info="Biggest longshot you'll consider. Drag all the way right for no ceiling.">
+              <input type="range" min="100" max="2000" step="10"
                 value={form.maxOdds}
                 onChange={e => updateForm({ maxOdds: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
@@ -790,8 +791,8 @@ export default function StrategyBuilder() {
           </Section>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Max picks per day: ${form.maxPicksPerDay}`} info="Caps how many picks this strategy surfaces per day. Keeps your bankroll discipline in check.">
-              <input type="range" min="1" max="25" step="1"
+            <Section title={`Max picks per day: ${form.maxPicksPerDay >= 100 ? "unlimited" : form.maxPicksPerDay}`} info="Caps how many picks this strategy surfaces per day. Drag all the way right to uncap.">
+              <input type="range" min="1" max="100" step="1"
                 value={form.maxPicksPerDay}
                 onChange={e => updateForm({ maxPicksPerDay: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
@@ -890,8 +891,8 @@ export default function StrategyBuilder() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Max vig at book: ${form.maxVigPct}%`} info="Reject offers at books with high juice. 4.5% is a standard -110/-110 line. Lower = only clean prices.">
-              <input type="range" min="3" max="15" step="0.5"
+            <Section title={`Max vig at book: ${form.maxVigPct >= 50 ? "any" : `${form.maxVigPct}%`}`} info="Reject offers at books with high juice. 4.5% is a standard -110/-110 line. Drag all the way right to allow any vig.">
+              <input type="range" min="3" max="50" step="0.5"
                 value={form.maxVigPct}
                 onChange={e => updateForm({ maxVigPct: parseFloat(e.target.value) })}
                 style={{ width: "100%" }} />
