@@ -23,6 +23,28 @@ const MARKETS = [
   { id: "totals", label: "Total (O/U)" },
 ];
 const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "Fanatics", "BetRivers"];
+const BOOK_URLS = {
+  DraftKings: "https://www.draftkings.com/sportsbook",
+  FanDuel: "https://www.fanduel.com/sportsbook",
+  BetMGM: "https://sports.betmgm.com",
+  Caesars: "https://www.caesars.com/sportsbook-and-casino",
+  Fanatics: "https://www.fanatics.com/sportsbook",
+  BetRivers: "https://www.betrivers.com",
+};
+const BookLink = ({ book, style }) => {
+  const url = BOOK_URLS[book];
+  if (!book) return null;
+  if (!url) return <span style={style}>{book}</span>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      style={{ color: "inherit", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2, ...style }}
+    >{book}</a>
+  );
+};
 const SIDES = [
   { id: "any", label: "Any" },
   { id: "fav", label: "Favorites only" },
@@ -562,7 +584,9 @@ export default function StrategyBuilder() {
                       <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: p.odds > 0 ? "#0d9f4f" : "#1a1d23" }}>
                         {fmtOdds(p.odds)}
                       </div>
-                      <div style={{ fontSize: 10, color: "#8b919a" }}>{p.book}</div>
+                      <div style={{ fontSize: 10, color: "#8b919a" }}>
+                        <BookLink book={p.book} />
+                      </div>
                     </div>
                   </div>
                 );

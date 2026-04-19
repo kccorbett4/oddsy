@@ -761,6 +761,33 @@ const formatTime = (iso) => {
 
 // ─── Components ─────────────────────────────────────────
 
+// Sportsbook name rendered as a link to the book's site (when we know it).
+// stopPropagation so nested clicks don't trigger the parent card's click.
+const BookLink = ({ book, style, prefix = "", suffix = "" }) => {
+  const url = BOOK_URLS[book];
+  const label = `${prefix}${book || ""}${suffix}`;
+  if (!book) return null;
+  if (!url) return <span style={style}>{label}</span>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        color: "inherit",
+        textDecoration: "underline",
+        textDecorationStyle: "dotted",
+        textUnderlineOffset: 2,
+        cursor: "pointer",
+        ...style,
+      }}
+    >
+      {label}
+    </a>
+  );
+};
+
 const Pill = ({ active, onClick, children, accent }) => (
   <button
     onClick={onClick}
@@ -1061,14 +1088,18 @@ const OddsRow = ({ game }) => {
         <div style={{ color: "#1a73e8", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.away.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "#8b919a" }}>{bestH2H.away.book}</div>
+        <div style={{ fontSize: 9, color: "#8b919a" }}>
+          <BookLink book={bestH2H.away.book} />
+        </div>
       </div>
       <div style={{ textAlign: "center", minWidth: 65 }}>
         <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 2 }}>BEST ML</div>
         <div style={{ color: "#0d9f4f", fontWeight: 700, fontFamily: "'Space Mono', monospace", fontSize: 13 }}>
           {formatOdds(bestH2H.home.odds)}
         </div>
-        <div style={{ fontSize: 9, color: "#8b919a" }}>{bestH2H.home.book}</div>
+        <div style={{ fontSize: 9, color: "#8b919a" }}>
+          <BookLink book={bestH2H.home.book} />
+        </div>
       </div>
     </div>
   );
@@ -1239,7 +1270,16 @@ export default function App() {
   const [legalPage, setLegalPage] = useState(null); // "terms" | "privacy" | "disclaimer" | "responsible" | null
   const [strategyStats, setStrategyStats] = useState({});
   const [resolvedPicks, setResolvedPicks] = useState([]);
-  const [recordPeriod, setRecordPeriod] = useState("all"); // "7" | "30" | "all"
+  // Record period lives in the URL (?period=7|30|all) so the browser back
+  // button walks period changes and each period is a shareable link.
+  const recordPeriod = (() => {
+    const p = new URLSearchParams(location.search).get("period");
+    return p === "7" || p === "30" ? p : "all";
+  })();
+  const setRecordPeriod = (p) => {
+    const search = p === "all" ? "" : `?period=${p}`;
+    navigate(`${location.pathname}${search}`);
+  };
   // Drill-down strategy comes from the URL (/record/:strategy) so browser
   // back works and links are shareable. Setter navigates.
   const selectedStrategy = routeParams.strategy || null;
@@ -1479,6 +1519,30 @@ export default function App() {
       odds: p.bestOdds,
       book: p.bestBook,
     }));
+
+    // Custom user-defined strategies (from localStorage). Each strategy is
+    // evaluated against the live odds using the same logic the builder shows,
+    // and matching picks are saved under `custom_<id>` so they accumulate a
+    // track record in the same Redis store as the built-ins.
+    try {
+      const customStrategies = loadCustomStrategies();
+      customStrategies.forEach(strat => {
+        const matches = evaluateStrategy(strat, games);
+        matches.forEach(m => picks.push({
+          strategy: `custom_${strat.id}`,
+          gameId: m.game.id,
+          homeTeam: m.game.home_team,
+          awayTeam: m.game.away_team,
+          sportKey: m.game.sport_key,
+          commenceTime: m.game.commence_time || m.commence,
+          marketType: m.marketType,
+          outcome: m.outcome,
+          point: m.point ?? null,
+          odds: m.odds,
+          book: m.book || "",
+        }));
+      });
+    } catch {}
 
     if (picks.length > 0) {
       fetch("/api/track-save", {
@@ -1772,7 +1836,9 @@ export default function App() {
                           <div style={{ fontSize: 16, fontWeight: 800, color: m.odds > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace" }}>
                             {formatOdds(m.odds)}
                           </div>
-                          <div style={{ fontSize: 10, color: "#8b919a" }}>{m.book}</div>
+                          <div style={{ fontSize: 10, color: "#8b919a" }}>
+                            <BookLink book={m.book} />
+                          </div>
                         </div>
                       </button>
                     ))}
@@ -2001,7 +2067,9 @@ export default function App() {
                           }}>
                             {formatOdds(p.odds)}
                           </div>
-                          <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 4 }}>{p.book}</div>
+                          <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 4 }}>
+                            <BookLink book={p.book} />
+                          </div>
                           <div style={{
                             fontSize: 10, fontWeight: 700, color: p.color,
                             background: `${p.color}12`, padding: "2px 6px", borderRadius: 4, display: "inline-block",
@@ -2307,7 +2375,7 @@ export default function App() {
                               {leg.outcome} {leg.point ? `(${leg.point > 0 ? '+' : ''}${leg.point})` : ''}
                             </div>
                             <div style={{ fontSize: 10, color: "#8b919a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {leg.game.away_team} @ {leg.game.home_team} · Best odds: <span style={{ color: "#1a73e8", fontWeight: 600 }}>{leg.book}</span>
+                              {leg.game.away_team} @ {leg.game.home_team} · Best odds: <BookLink book={leg.book} style={{ color: "#1a73e8", fontWeight: 600 }} />
                             </div>
                           </div>
                         </div>
@@ -2532,14 +2600,14 @@ export default function App() {
                           <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Leg 1</div>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>{combo.leg1.label}</div>
                           <div style={{ fontSize: 13, fontWeight: 800, color: combo.leg1.price > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
-                            {formatOdds(combo.leg1.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>({combo.leg1.book})</span>
+                            {formatOdds(combo.leg1.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>(<BookLink book={combo.leg1.book} />)</span>
                           </div>
                         </div>
                         <div style={{ flex: 1, background: "#f8faf8", borderRadius: 8, padding: "10px 12px" }}>
                           <div style={{ fontSize: 10, color: "#8b919a", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Leg 2</div>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d23" }}>{combo.leg2.label}</div>
                           <div style={{ fontSize: 13, fontWeight: 800, color: combo.leg2.price > 0 ? "#0d9f4f" : "#1a1d23", fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
-                            {formatOdds(combo.leg2.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>({combo.leg2.book})</span>
+                            {formatOdds(combo.leg2.price)} <span style={{ fontSize: 10, fontWeight: 500, color: "#8b919a" }}>(<BookLink book={combo.leg2.book} />)</span>
                           </div>
                         </div>
                       </div>
@@ -2573,7 +2641,7 @@ export default function App() {
 
         {/* ── TRACK RECORD TAB ── */}
         {activeTab === "record" && (() => {
-          const rows = [
+          const builtInRows = [
             { id: "sharp", label: "Sharp Plays", color: "#1a73e8", icon: "🧠",
               desc: "Composite-scored plays — discrepancy, underdog, divergence, EV." },
             { id: "value", label: "Value Bets", color: "#0d9f4f", icon: "⚡",
@@ -2587,6 +2655,35 @@ export default function App() {
             { id: "narrative", label: "Narrative Regression", color: "#d97706", icon: "📉",
               desc: "Fade the overreaction after a blowout loss." },
           ];
+
+          // Build dynamic rows for the user's custom strategies — named from
+          // localStorage, but also surface rows for any `custom_*` strategy
+          // that has picks in Redis even if the local definition was deleted.
+          const customStrategies = loadCustomStrategies();
+          const customById = new Map(customStrategies.map(s => [s.id, s]));
+          const customIdsFromPicks = new Set(
+            (resolvedPicks || [])
+              .map(p => p.strategy)
+              .filter(s => typeof s === "string" && s.startsWith("custom_"))
+              .map(s => s.slice(7))
+          );
+          const allCustomIds = new Set([...customById.keys(), ...customIdsFromPicks]);
+          const customRows = [...allCustomIds].map(cid => {
+            const s = customById.get(cid);
+            return {
+              id: `custom_${cid}`,
+              label: s?.name || "Deleted Strategy",
+              color: "#7c3aed",
+              icon: "⚙️",
+              desc: s
+                ? `${s.sports?.length || 0} sport${s.sports?.length === 1 ? "" : "s"} · Min ${s.minEv}% EV · ${s.minBooks}+ books`
+                : "Strategy was deleted — historical picks remain.",
+              custom: true,
+              missing: !s,
+            };
+          });
+
+          const rows = [...builtInRows, ...customRows];
 
           // Filter picks by selected period
           const now = Date.now();
@@ -2793,7 +2890,7 @@ export default function App() {
                               {profit >= 0 ? "+" : ""}{profit.toFixed(2)}u
                             </div>
                             <div style={{ fontSize: 10, color: "#8b919a", fontFamily: "'Space Mono', monospace" }}>
-                              {p.odds} · {p.book}
+                              {p.odds} · <BookLink book={p.book} />
                             </div>
                           </div>
                         </div>
