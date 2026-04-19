@@ -115,16 +115,26 @@ const getGameStatus = (game, liveScores) => {
     return "upcoming";
   }
 
-  // Try to match this odds game to a live score event by team names
+  // Try to match this odds game to a live score event by team names.
+  // Teams often play multi-game series on consecutive days (especially MLB),
+  // so we also require the score event's commence time to be within ±12h
+  // of the odds game's — otherwise today's scheduled Royals/Yankees game
+  // would match yesterday's final and be incorrectly flagged as over.
   const homeNorm = game.home_team?.toLowerCase();
   const awayNorm = game.away_team?.toLowerCase();
+  const oddsMs = new Date(game.commence_time).getTime();
 
   const match = liveScores.find(e => {
+    if (e.sport_key && game.sport_key && e.sport_key !== game.sport_key) return false;
     const h = e.home?.name?.toLowerCase() || "";
     const a = e.away?.name?.toLowerCase() || "";
-    return (h.includes(homeNorm) || homeNorm?.includes(h) || a.includes(awayNorm) || awayNorm?.includes(a))
-      && (h.includes(homeNorm) || homeNorm?.includes(h))
-      && (a.includes(awayNorm) || awayNorm?.includes(a));
+    const teamsMatch =
+      (h.includes(homeNorm) || homeNorm?.includes(h)) &&
+      (a.includes(awayNorm) || awayNorm?.includes(a));
+    if (!teamsMatch) return false;
+    const eMs = e.commenceTime ? new Date(e.commenceTime).getTime() : null;
+    if (eMs === null) return true;
+    return Math.abs(eMs - oddsMs) <= 12 * 3600 * 1000;
   });
 
   if (!match) {
