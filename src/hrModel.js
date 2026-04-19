@@ -273,6 +273,7 @@ export function rankHrProjections(ctx, odds) {
         game: {
           home: game.home, away: game.away, commence: game.commence,
           venue: game.venue, outdoor: game.outdoor,
+          park: game.park || null,
         },
         opposingPitcher: opposingPitcher || null,
         lineupOrder,
