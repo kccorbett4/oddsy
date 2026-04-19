@@ -53,10 +53,18 @@ const normName = (s) => (s || "").trim();
 //   leagues/84240/categories/743/subcategories/{id}?format=json -> offers
 // In practice the subcategory ID has been stable (~17000-range) but we
 // look it up dynamically to tolerate renumbering.
+//
+// DK upgraded the Nash API from v1 → v2 in April 2026. We try v2 first
+// and fall back to v1 in case they maintain both for backwards compat.
 async function scrapeDraftKings() {
-  const base = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1";
-  const catsUrl = `${base}/leagues/84240/categories`;
-  const cats = await jfetch(catsUrl);
+  const v2 = "https://sportsbook-nash.draftkings.com/api/v2/dkusnj";
+  const v1 = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1";
+  let base = v2;
+  let cats = await jfetch(`${base}/leagues/84240/categories`).catch(() => null);
+  if (!cats || !Array.isArray(cats?.categories)) {
+    base = v1;
+    cats = await jfetch(`${base}/leagues/84240/categories`);
+  }
 
   const propsCat = (cats?.categories || []).find(c =>
     (c.name || "").toLowerCase().includes("player") ||
@@ -131,9 +139,9 @@ async function scrapeDraftKings() {
 // uses. The content-managed-page endpoint returns MLB events with their
 // event IDs; per-event we hit event-page which includes all markets
 // (we filter to "To Hit A Home Run"). FanDuel uses sub-domains per
-// state — "al" (global/general) works for read-only odds queries.
+// state — "nj" is used here as a read-only odds source.
 async function scrapeFanDuel() {
-  const base = "https://sbapi.al.sportsbook.fanduel.com/api";
+  const base = "https://sbapi.nj.sportsbook.fanduel.com/api";
   const mlbPage = await jfetch(
     `${base}/content-managed-page?page=CUSTOM&customPageId=mlb&pbHsa=false&pbHorizontal=false&_ak=FhMFpcPWXMeyZxOx`
   );

@@ -32,18 +32,16 @@ const americanToDecimal = (a) => {
   return a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
 };
 
-// Odds provider toggle — mirrors api/odds.js. Flip ODDS_PROVIDER=theoddsapi
-// in Vercel to revert. parlay-api uses "player_home_runs" where The Odds
-// API uses "batter_home_runs".
-const ODDS_PROVIDER = (process.env.ODDS_PROVIDER || "parlay").toLowerCase();
-const ODDS_BASE = ODDS_PROVIDER === "theoddsapi"
-  ? "https://api.the-odds-api.com/v4"
-  : "https://parlay-api.com/v1";
-const HR_MARKET_KEY = ODDS_PROVIDER === "theoddsapi" ? "batter_home_runs" : "player_home_runs";
+// HR props are hard-pinned to The Odds API. Parlay-api's catalog only
+// carries DFS-app HR lines (PrizePicks/Underdog/Sleeper/Fliff/Betr) under
+// `player_home_runs` — no DraftKings, FanDuel, Caesars, BetMGM, BetRivers,
+// Fanatics, Hard Rock, etc. The Odds API's `batter_home_runs` market has
+// the traditional sportsbooks we actually need, so we ignore ODDS_PROVIDER
+// here and always use The Odds API for HR data.
+const ODDS_BASE = "https://api.the-odds-api.com/v4";
+const HR_MARKET_KEY = "batter_home_runs";
 function oddsApiKey() {
-  return ODDS_PROVIDER === "theoddsapi"
-    ? process.env.ODDS_API_KEY
-    : (process.env.PARLAY_API_KEY || process.env.ODDS_API_KEY);
+  return process.env.ODDS_API_KEY;
 }
 
 // ──────────────────────── context handler ────────────────────────
@@ -780,9 +778,10 @@ async function handleHealthcheck(req, res) {
 }
 
 // ──────────────────────── debug (parlay-api discovery) ────────────────────────
+// These hit parlay-api directly, independent of the HR handler's Odds-API pin.
 async function handleDebugMarketKeys(req, res) {
-  const API_KEY = oddsApiKey();
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+  const API_KEY = process.env.PARLAY_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "PARLAY_API_KEY not configured" });
   const url = `https://parlay-api.com/v1/sports/baseball_mlb/props/markets?apiKey=${API_KEY}`;
   const r = await fetch(url);
   const body = await r.text();
@@ -791,8 +790,8 @@ async function handleDebugMarketKeys(req, res) {
 }
 
 async function handleDebugPropsRaw(req, res) {
-  const API_KEY = oddsApiKey();
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+  const API_KEY = process.env.PARLAY_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "PARLAY_API_KEY not configured" });
   const market = req.query?.market || "player_home_runs";
   const url = `https://parlay-api.com/v1/sports/baseball_mlb/props`
     + `?apiKey=${API_KEY}&markets=${market}&oddsFormat=american&limit=20`;
