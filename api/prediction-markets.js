@@ -256,12 +256,26 @@ export default async function handler(req, res) {
 
     const matches = [];
 
-    // Kalshi → sportsbook
+    // Kalshi → sportsbook. Each game is two markets in Kalshi (one per
+    // possible winner), and their no_sub_title field is unreliable (often
+    // duplicates yes_sub_title), so we parse both teams from the title
+    // and dedupe by event_ticker to only produce one comparison per game.
+    const seenKalshiEvents = new Set();
     for (const { sportKey, cfg, markets } of kalshiBySport) {
       for (const m of markets) {
+        const evTicker = m.event_ticker;
+        if (evTicker && seenKalshiEvents.has(evTicker)) continue;
+
+        const titleMatch = (m.title || "").trim().match(/^(.+?)\s+vs\s+(.+?)\s+Winner\??$/i);
         const yesTeam = m.yes_sub_title;
-        const noTeam = m.no_sub_title;
-        if (!yesTeam || !noTeam || yesTeam === noTeam) continue;
+        if (!titleMatch || !yesTeam) continue;
+        const teamA = titleMatch[1].trim();
+        const teamB = titleMatch[2].trim();
+        const noTeam = normName(teamA) === normName(yesTeam) ? teamB
+                     : normName(teamB) === normName(yesTeam) ? teamA
+                     : null;
+        if (!noTeam) continue;
+
         const kTime = m.occurrence_datetime ? new Date(m.occurrence_datetime).getTime() : null;
         if (kTime == null) continue;
 
@@ -297,6 +311,7 @@ export default async function handler(req, res) {
           predAsk: ask,
         });
         if (comp) matches.push(comp);
+        if (evTicker) seenKalshiEvents.add(evTicker);
       }
     }
 
