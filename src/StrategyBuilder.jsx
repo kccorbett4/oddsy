@@ -70,7 +70,6 @@ const TIMES = [
 ];
 const NOTIFY_MODES = [
   { id: "off", label: "Off" },
-  { id: "immediate", label: "Immediate" },
   { id: "digest", label: "Daily digest" },
 ];
 
@@ -737,7 +736,7 @@ export default function StrategyBuilder() {
 
           {/* ── Notifications ─────────────────────────────── */}
           <div style={{ borderTop: "1px solid #e2e5ea", margin: "8px 0 18px" }} />
-          <Section title="Email notifications" info="Off = no emails. Immediate = email when a new pick matches (deduped, so you only hear about each pick once). Daily digest = one summary email per day.">
+          <Section title="Email notifications" info="Off = no emails. Daily digest = one summary email per day with any new picks that match this strategy.">
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {NOTIFY_MODES.map(m => (
                 <button key={m.id} onClick={() => updateForm({ notifyMode: m.id })}
@@ -746,7 +745,7 @@ export default function StrategyBuilder() {
             </div>
             {form.notifyMode !== "off" && user?.email && (
               <div style={{ fontSize: 10, color: "#8b919a", marginTop: 8 }}>
-                Notifications will be sent to <strong>{user.email}</strong>.
+                One summary email per day to <strong>{user.email}</strong>.
               </div>
             )}
           </Section>
