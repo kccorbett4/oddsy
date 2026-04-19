@@ -1796,6 +1796,14 @@ export default function App() {
                   }}>
                     Track Record
                   </button>
+                  <button onClick={() => navigate("/strategy-builder")} style={{
+                    padding: "10px 20px", borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "transparent", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    Build a Strategy
+                  </button>
                 </div>
               </div>
 
@@ -2025,13 +2033,23 @@ export default function App() {
 
           return (
             <>
-              <div style={{ marginBottom: 12 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#1a1d23" }}>
-                  Today's Picks
-                </h2>
-                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-                  Every bet with a statistical edge, ranked by strength. Tap a chip to filter by strategy.
+              <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div>
+                  <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#1a1d23" }}>
+                    Today's Picks
+                  </h2>
+                  <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                    Every bet with a statistical edge, ranked by strength. Tap a chip to filter by strategy.
+                  </div>
                 </div>
+                <button onClick={() => navigate("/strategy-builder")} style={{
+                  flexShrink: 0, padding: "8px 12px", borderRadius: 8,
+                  border: "1px solid #1a73e8", background: "#fff", color: "#1a73e8",
+                  fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}>
+                  + Build Strategy
+                </button>
               </div>
 
               {/* Strategy chips */}
