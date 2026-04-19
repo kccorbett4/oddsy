@@ -1,24 +1,6 @@
 {
   "rewrites": [
-    { "source": "/ev-betting", "destination": "/index.html" },
-    { "source": "/odds-comparison", "destination": "/index.html" },
-    { "source": "/parlay-calculator", "destination": "/index.html" },
-    { "source": "/sharp-betting", "destination": "/index.html" },
-    { "source": "/betting-alerts", "destination": "/index.html" },
-    { "source": "/live-scores", "destination": "/index.html" },
-    { "source": "/reverse-line-movement", "destination": "/index.html" },
-    { "source": "/correlated-parlays", "destination": "/index.html" },
-    { "source": "/stale-line-detector", "destination": "/index.html" },
-    { "source": "/narrative-regression", "destination": "/index.html" },
-    { "source": "/picks", "destination": "/index.html" },
-    { "source": "/picks/:path*", "destination": "/index.html" },
-    { "source": "/parlays", "destination": "/index.html" },
-    { "source": "/games", "destination": "/index.html" },
-    { "source": "/games/:path*", "destination": "/index.html" },
-    { "source": "/record", "destination": "/index.html" },
-    { "source": "/record/:path*", "destination": "/index.html" },
-    { "source": "/strategy-builder", "destination": "/index.html" },
-    { "source": "/strategy-builder/:path*", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [
     {
