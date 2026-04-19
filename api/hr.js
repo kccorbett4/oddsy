@@ -1125,6 +1125,42 @@ async function handleDebugHrBooks(req, res) {
   });
 }
 
+// Dump team-name metadata from every scraper so we can diagnose
+// why mergeScrapedIntoEvents returns `attached: 0`. Reveals whether
+// scrapers are pulling different team names, empty player lists, or
+// matching correctly but having other issues.
+async function handleDebugScrapers(req, res) {
+  const API_KEY = oddsApiKey();
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+  const [scraped, eventList] = await Promise.all([
+    fetchScrapedHr(),
+    jsonFetch(`${ODDS_BASE}/sports/baseball_mlb/events?apiKey=${API_KEY}`),
+  ]);
+  const oddsEvents = Array.isArray(eventList) ? eventList.map(e => ({
+    home: e.home_team, away: e.away_team, commence: e.commence_time,
+  })) : [];
+  const summarize = (result) => {
+    if (!result?.ok) return { ok: false, error: result?.error, skipped: result?.skipped };
+    return {
+      ok: true,
+      eventCount: result.eventCount,
+      events: (result.events || []).map(ev => ({
+        home: ev.home, away: ev.away,
+        playerCount: ev.players?.length || 0,
+        samplePlayers: (ev.players || []).slice(0, 2).map(p => ({
+          name: p.name, bookCount: p.books?.length || 0,
+        })),
+      })),
+    };
+  };
+  return res.status(200).json({
+    oddsApiEvents: oddsEvents,
+    draftkings: summarize(scraped.draftkings),
+    fanduel: summarize(scraped.fanduel),
+    bovada: summarize(scraped.bovada),
+  });
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -1138,6 +1174,7 @@ export default async function handler(req, res) {
     if (action === "debug_props_raw") return await handleDebugPropsRaw(req, res);
     if (action === "debug_event_odds") return await handleDebugEventOdds(req, res);
     if (action === "debug_hr_books") return await handleDebugHrBooks(req, res);
+    if (action === "debug_scrapers") return await handleDebugScrapers(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
