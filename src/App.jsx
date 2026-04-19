@@ -944,7 +944,9 @@ const BookLink = ({ book, style, prefix = "", suffix = "" }) => {
 // we can pull offers across every bookmaker.
 const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
   const [open, setOpen] = useState(false);
+  const [align, setAlign] = useState("right"); // "right" default; flip to "left" if overflowing viewport
   const wrapRef = useRef(null);
+  const popRef = useRef(null);
 
   // Dismiss on tap/click outside. Mouseleave isn't enough on touch devices
   // — once the popover opens on tap there's no "leave" event to close it.
@@ -959,6 +961,17 @@ const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("touchstart", onDocDown);
     };
+  }, [open]);
+
+  // When the popover opens, check whether right-alignment pushes it off the
+  // left edge of the viewport (common for the leftmost column on mobile) and
+  // flip to left-alignment if so.
+  useEffect(() => {
+    if (!open) { setAlign("right"); return; }
+    const el = popRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.left < 4) setAlign("left");
   }, [open]);
 
   if (!game || !marketType || !outcome) return null;
@@ -997,9 +1010,12 @@ const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
       </button>
       {open && (
         <div
+          ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{
-            position: "absolute", right: 0, top: "calc(100% + 4px)",
+            position: "absolute",
+            ...(align === "left" ? { left: 0 } : { right: 0 }),
+            top: "calc(100% + 4px)",
             zIndex: 1000,
             background: "#fff", border: "1px solid #e2e5ea",
             borderRadius: 8, padding: "8px 10px",

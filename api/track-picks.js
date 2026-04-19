@@ -7,6 +7,22 @@
 import { getRedis } from "./_redis.js";
 import { getUserIdFromRequest } from "./_auth.js";
 
+const AUTO_RESOLVE_THROTTLE_KEY = "auto_resolve:last_run";
+const AUTO_RESOLVE_MIN_GAP_SECONDS = 10 * 60;
+
+// Shared with track-stats — fire the resolver in the background (throttled)
+// so picks settle without waiting for the once-daily cron.
+async function maybeTriggerAutoResolve(client, origin) {
+  try {
+    const last = await client.get(AUTO_RESOLVE_THROTTLE_KEY);
+    const now = Date.now();
+    if (last && now - parseInt(last) < AUTO_RESOLVE_MIN_GAP_SECONDS * 1000) return;
+    await client.set(AUTO_RESOLVE_THROTTLE_KEY, String(now), { EX: AUTO_RESOLVE_MIN_GAP_SECONDS * 2 });
+    if (!origin) return;
+    fetch(`${origin}/api/track-resolve`).catch(() => {});
+  } catch {}
+}
+
 function unitsOnWin(oddsStr) {
   const odds = parseFloat(oddsStr);
   if (!Number.isFinite(odds) || odds === 0) return 0;
@@ -21,6 +37,11 @@ export default async function handler(req, res) {
     }
 
     const userId = await getUserIdFromRequest(req);
+
+    const host = req.headers?.["x-forwarded-host"] || req.headers?.host;
+    const proto = req.headers?.["x-forwarded-proto"] || "https";
+    const origin = host ? `${proto}://${host}` : null;
+    maybeTriggerAutoResolve(client, origin);
 
     // ?peek=1 — diagnostic: return pick id prefix counts for all pick keys
     // plus resolved/unresolved breakdown, so we can tell if saves or the

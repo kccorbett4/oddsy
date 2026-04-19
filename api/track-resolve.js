@@ -90,11 +90,14 @@ export default async function handler(req, res) {
       soccer_usa_mls: "soccer/usa.1",
     };
 
-    // Fetch scores for today and yesterday
+    // Fetch scores going back 7 days. Hobby's daily-only cron means any
+    // skipped run used to let picks age past the old 48h expiry before the
+    // resolver ever saw them. With a 7-day window we catch up even after
+    // a missed run, and still expire stragglers (same 48h rule below).
     const allScores = [];
     for (const [key, espnPath] of Object.entries(sportMap)) {
       try {
-        for (const dateOffset of [0, -1]) {
+        for (const dateOffset of [0, -1, -2, -3, -4, -5, -6]) {
           const d = new Date(now + dateOffset * 86400000);
           const dateStr = d.toISOString().slice(0, 10).replace(/-/g, "");
           const url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${dateStr}`;
