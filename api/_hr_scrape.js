@@ -57,8 +57,14 @@ const normName = (s) => (s || "").trim();
 // DK upgraded the Nash API from v1 → v2 in April 2026. We try v2 first
 // and fall back to v1 in case they maintain both for backwards compat.
 async function scrapeDraftKings() {
-  const v2 = "https://sportsbook-nash.draftkings.com/api/v2/dkusnj";
-  const v1 = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1";
+  // Route through a Cloudflare Worker proxy (workers/dk-proxy/) since DK's
+  // Nash API is Akamai-blocked from Vercel serverless IPs. The worker
+  // forwards /proxy/<path> → https://sportsbook-nash.draftkings.com/<path>.
+  const proxy = process.env.DK_PROXY_URL;
+  if (!proxy) throw new Error("DK_PROXY_URL not configured");
+  const p = proxy.replace(/\/$/, "");
+  const v2 = `${p}/proxy/api/v2/dkusnj`;
+  const v1 = `${p}/proxy/api/sportscontent/dkusnj/v1`;
   let base = v2;
   let cats = await jfetch(`${base}/leagues/84240/categories`).catch(() => null);
   if (!cats || !Array.isArray(cats?.categories)) {
@@ -311,19 +317,25 @@ async function scrapeBovada() {
 // ────────────────────────────────────────────────────────────────────
 // Public entrypoint
 // ────────────────────────────────────────────────────────────────────
-// DK was dropped from the scraper on 2026-04-19 — their Nash API is
-// Akamai-blocked from Vercel's serverless IP range, and The Odds API
-// already returns DraftKings HR lines under `batter_home_runs`, so the
-// scraper was redundant when it worked and an alert source when it
-// didn't. FanDuel stays: Odds API coverage for FD HR props is spottier.
-// Bovada is in The Odds API for main markets but not for HR props on our
-// plan — the scraper fills just the HR gap.
-// If DK HR coverage regresses, re-introduce via a proxy (Cloudflare
-// Worker on a residential/non-cloud ASN).
+// DK Nash API is Akamai-blocked from Vercel serverless IPs, and our Odds
+// API plan doesn't include DK for `batter_home_runs`. Re-enabled via a
+// Cloudflare Worker proxy (workers/dk-proxy/) — scraper runs only when
+// DK_PROXY_URL is set. Without the env var, DK is marked "skipped" and
+// the rest of the stack continues. FanDuel and Bovada scrape direct
+// because neither is IP-blocked from Vercel.
 export async function fetchScrapedHr() {
-  const [fd, bv] = await Promise.allSettled([scrapeFanDuel(), scrapeBovada()]);
+  const dkEnabled = !!process.env.DK_PROXY_URL;
+  const [dk, fd, bv] = await Promise.allSettled([
+    dkEnabled ? scrapeDraftKings() : Promise.resolve(null),
+    scrapeFanDuel(),
+    scrapeBovada(),
+  ]);
   return {
-    draftkings: { ok: true, events: [], eventCount: 0, skipped: "covered by Odds API" },
+    draftkings: dkEnabled
+      ? (dk.status === "fulfilled"
+          ? { ok: true, events: dk.value || [], eventCount: (dk.value || []).length }
+          : { ok: false, error: dk.reason?.message || String(dk.reason), events: [] })
+      : { ok: true, events: [], eventCount: 0, skipped: "DK_PROXY_URL not set — deploy workers/dk-proxy and set env var to enable" },
     fanduel: fd.status === "fulfilled"
       ? { ok: true, events: fd.value, eventCount: fd.value.length }
       : { ok: false, error: fd.reason?.message || String(fd.reason), events: [] },
