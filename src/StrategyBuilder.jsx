@@ -548,10 +548,12 @@ export default function StrategyBuilder() {
       .catch(() => {});
   }, []);
 
-  // Live preview — re-evaluates as the user tweaks controls
+  // Live preview — re-evaluates as the user tweaks controls. We override
+  // maxPicksPerDay with a large number so the preview shows every match the
+  // filters produce (the cap is meaningful for tracking, not discovery).
   const preview = useMemo(() => {
     if (!form) return [];
-    return evaluateStrategy(form, games, contextMap);
+    return evaluateStrategy({ ...form, maxPicksPerDay: 10000 }, games, contextMap);
   }, [form, games, contextMap]);
 
   const handleSave = async () => {
