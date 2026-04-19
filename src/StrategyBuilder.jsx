@@ -76,30 +76,48 @@ const NOTIFY_MODES = [
 const DEFAULT_STRATEGY = () => ({
   id: null,
   name: "My Strategy",
-  sports: ["americanfootball_nfl", "basketball_nba"],
-  markets: ["spreads", "totals"],
-  minEv: 2,
-  minBooks: 3,
-  minOdds: -250,
-  maxOdds: 300,
+  // Start wide-open — every sport, every market, no thresholds. Users narrow
+  // down from here. (Previously defaulted to NFL+NBA / spreads+totals / 2% EV /
+  // 3+ books, which silently pre-filtered results.)
+  sports: SPORTS.map(s => s.id),
+  markets: MARKETS.map(m => m.id),
+  minEv: 0,
+  minBooks: 1,
+  minOdds: -10000,
+  maxOdds: 10000,
   side: "any",
   location: "any",
-  maxPicksPerDay: 5,
-  hoursWindow: 48,
+  maxPicksPerDay: 50,
+  hoursWindow: 168,
   books: [],
-  // New filters
   totalMin: 0,
-  totalMax: 300,
+  totalMax: 500,
   spreadMin: 0,
-  spreadMax: 30,
-  daysOfWeek: [],        // empty = any day
+  spreadMax: 100,
+  daysOfWeek: [],
   timeOfDay: "any",
-  minBookDisagreement: 0, // min spread between highest/lowest line across books
+  minBookDisagreement: 0,
   minHoursUntilTip: 0,
   excludePrimetime: false,
-  maxVigPct: 15,         // reject offers where the book's vig exceeds this
+  maxVigPct: 100,
+  // Game-context filters — each has a tri-state mode (off / skip / only)
+  // + a threshold (ignored for boolean filters). "skip" rejects games where
+  // the condition is met; "only" requires the condition. Mix & match to
+  // build contrarian strategies (e.g., "only high-wind games + FPI underdog").
+  windMode: "off",              // off | skip | only — condition: wind ≥ windMphThreshold
+  windMphThreshold: 15,
+  tempMode: "off",              // off | skip | only — condition: temp < tempFThreshold (cold)
+  tempFThreshold: 32,
+  precipMode: "off",            // off | skip | only — condition: precip prob ≥ 50%
+  restMode: "off",              // off | skip | only — condition: rest ≥ restDaysThreshold
+  restDaysThreshold: 2,
+  winPctMode: "off",            // off | skip | only — condition: team winPct ≥ teamWinPctThreshold
+  teamWinPctThreshold: 60,
+  fpiMode: "off",               // off | skip | only — condition: FPI edge ≥ fpiEdgeThreshold (NFL/NBA)
+  fpiEdgeThreshold: 3,
+  injuryMode: "off",            // off | skip | only — condition: any player listed Out
   // Notifications
-  notifyMode: "off",     // off | immediate | digest
+  notifyMode: "off",     // off | digest
   createdAt: new Date().toISOString(),
 });
 
@@ -119,11 +137,57 @@ const median = (arr) => {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 };
 
+export const gameCtxKey = (game) => `${game.sport_key}:${game.away_team}@${game.home_team}`;
+
+// Migrate pre-tri-state strategies (where each filter was a one-way exclude)
+// to the new {mode, threshold} shape. Safe to call on new-shape strategies too.
+function normalizeGameCtxFilters(s) {
+  const o = { ...s };
+  if (o.windMode === undefined) {
+    o.windMode = (o.maxWindMph || 0) > 0 ? "skip" : "off";
+    o.windMphThreshold = o.windMphThreshold ?? (o.maxWindMph || 15);
+  }
+  if (o.tempMode === undefined) {
+    o.tempMode = (o.minTempF || 0) > 0 ? "skip" : "off";
+    o.tempFThreshold = o.tempFThreshold ?? (o.minTempF || 32);
+  }
+  if (o.precipMode === undefined) {
+    o.precipMode = o.excludeWetGames ? "skip" : "off";
+  }
+  if (o.restMode === undefined) {
+    o.restMode = (o.minRestDays || 0) > 0 ? "skip" : "off";
+    o.restDaysThreshold = o.restDaysThreshold ?? (o.minRestDays || 2);
+  }
+  if (o.winPctMode === undefined) {
+    o.winPctMode = (o.minTeamWinPct || 0) > 0 ? "skip" : "off";
+    o.teamWinPctThreshold = o.teamWinPctThreshold ?? (o.minTeamWinPct || 60);
+  }
+  if (o.fpiMode === undefined) {
+    o.fpiMode = (o.minFpiEdge || 0) > 0 ? "skip" : "off";
+    o.fpiEdgeThreshold = o.fpiEdgeThreshold ?? (o.minFpiEdge || 3);
+  }
+  if (o.injuryMode === undefined) {
+    o.injuryMode = o.excludeKeyInjuries ? "skip" : "off";
+  }
+  return o;
+}
+
+// Applies a tri-state gate. Returns true if the game should be rejected.
+// cond = whether the condition is currently met.
+const gateFails = (mode, cond) => {
+  if (mode === "skip") return cond;   // reject when condition met
+  if (mode === "only") return !cond;  // reject when condition NOT met
+  return false;
+};
+
 // ─── Strategy evaluator ─────────────────────────────
 // Walks every game → market → outcome and returns the picks that match
 // the strategy's filters, sorted by EV desc and capped at maxPicksPerDay.
-export function evaluateStrategy(strategy, games) {
+// contextMap: optional { [gameCtxKey]: { weather, homeRecord, awayRecord, ... } }
+// — if omitted, game-context filters are skipped gracefully.
+export function evaluateStrategy(strategy, games, contextMap = null) {
   if (!games || games.length === 0) return [];
+  strategy = normalizeGameCtxFilters(strategy);
   const out = [];
   const now = Date.now();
   const cutoff = now + (strategy.hoursWindow || 48) * 3600 * 1000;
@@ -151,6 +215,47 @@ export function evaluateStrategy(strategy, games) {
     if (strategy.timeOfDay === "primetime" && !isPrimetime) return;
     if (strategy.timeOfDay === "latenight" && !isLateNight) return;
     if (strategy.excludePrimetime && isPrimetime) return;
+
+    // ── Game-context gates (weather, rest, injuries) ──
+    const ctx = contextMap ? contextMap[gameCtxKey(game)] : null;
+    const needsCtx = strategy.windMode !== "off" || strategy.tempMode !== "off"
+      || strategy.precipMode !== "off" || strategy.restMode !== "off"
+      || strategy.injuryMode !== "off";
+    // If the strategy requires context but we don't have any, skip this game
+    if (needsCtx && !ctx) return;
+    if (ctx) {
+      // Weather (outdoor games only — indoor stadiums bypass weather gates)
+      const w = ctx.weather;
+      const outdoorCheckable = w && ctx.outdoor;
+      if (strategy.windMode !== "off") {
+        if (!outdoorCheckable) return; // can't evaluate — reject either way
+        const cond = typeof w.windMph === "number" && w.windMph >= strategy.windMphThreshold;
+        if (gateFails(strategy.windMode, cond)) return;
+      }
+      if (strategy.tempMode !== "off") {
+        if (!outdoorCheckable) return;
+        const cond = typeof w.tempF === "number" && w.tempF < strategy.tempFThreshold;
+        if (gateFails(strategy.tempMode, cond)) return;
+      }
+      if (strategy.precipMode !== "off") {
+        if (!outdoorCheckable) return;
+        const cond = typeof w.precipProb === "number" && w.precipProb >= 50;
+        if (gateFails(strategy.precipMode, cond)) return;
+      }
+      // Rest days — condition = BOTH teams well-rested (≥ threshold)
+      if (strategy.restMode !== "off") {
+        const hr = ctx.homeRestDays, ar = ctx.awayRestDays;
+        if (hr == null || ar == null) return;
+        const cond = hr >= strategy.restDaysThreshold && ar >= strategy.restDaysThreshold;
+        if (gateFails(strategy.restMode, cond)) return;
+      }
+      // Key injuries — condition = any "Out" player listed on either team
+      if (strategy.injuryMode !== "off") {
+        const anyOut = (list) => Array.isArray(list) && list.some(p => p.status === "Out" || p.status === "Injured Reserve");
+        const cond = anyOut(ctx.homeInjuries) || anyOut(ctx.awayInjuries);
+        if (gateFails(strategy.injuryMode, cond)) return;
+      }
+    }
 
     strategy.markets.forEach(marketType => {
       // Two-way vig removal per book, then median fair prob across books.
@@ -199,12 +304,31 @@ export function evaluateStrategy(strategy, games) {
           if (outcome.bookVig > maxVig) return;
           if (strategy.side === "fav" && outcome.price >= 0) return;
           if (strategy.side === "dog" && outcome.price <= 0) return;
-          // Location filter only applies to h2h / spreads where we can
-          // tell which side is home vs away by team name match.
-          if (strategy.location !== "any" && (marketType === "h2h" || marketType === "spreads")) {
+          // Location + team-specific filters. Only meaningful for h2h / spreads
+          // where outcome.name is the team name we can tie back to records + FPI.
+          if (marketType === "h2h" || marketType === "spreads") {
             const isHome = outcome.name === game.home_team;
             if (strategy.location === "home" && !isHome) return;
             if (strategy.location === "away" && isHome) return;
+
+            if (strategy.winPctMode !== "off") {
+              if (!ctx) return;
+              const teamRec = isHome ? ctx.homeRecord : ctx.awayRecord;
+              if (!teamRec || typeof teamRec.winPct !== "number") return;
+              const cond = teamRec.winPct * 100 >= strategy.teamWinPctThreshold;
+              if (gateFails(strategy.winPctMode, cond)) return;
+            }
+            if (strategy.fpiMode !== "off") {
+              if (!ctx) return;
+              const teamFPI = isHome ? ctx.homeFPI : ctx.awayFPI;
+              const oppFPI = isHome ? ctx.awayFPI : ctx.homeFPI;
+              if (typeof teamFPI !== "number" || typeof oppFPI !== "number") return;
+              const cond = teamFPI - oppFPI >= strategy.fpiEdgeThreshold;
+              if (gateFails(strategy.fpiMode, cond)) return;
+            }
+          } else if (strategy.winPctMode !== "off" || strategy.fpiMode !== "off") {
+            // Totals market — team-specific filters can't apply
+            return;
           }
           // Market-specific point-range filters
           if (marketType === "totals" && typeof outcome.point === "number") {
@@ -312,6 +436,25 @@ function Section({ title, info, children }) {
   );
 }
 
+// Tri-state filter control: Off / Skip if <cond> / Only if <cond>.
+// When not "off", renders the threshold slider beneath the mode chips.
+function TriFilter({ title, info, mode, onMode, conditionLabel, thresholdUi }) {
+  return (
+    <Section title={title} info={info}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: thresholdUi ? 10 : 0 }}>
+        <button onClick={() => onMode("off")} style={chipStyle(!mode || mode === "off")}>Off</button>
+        <button onClick={() => onMode("skip")} style={chipStyle(mode === "skip", "#dc2626")}>
+          Skip {conditionLabel}
+        </button>
+        <button onClick={() => onMode("only")} style={chipStyle(mode === "only", "#0d9f4f")}>
+          Only {conditionLabel}
+        </button>
+      </div>
+      {mode && mode !== "off" && thresholdUi}
+    </Section>
+  );
+}
+
 // ─── Main component ─────────────────────────────────
 export default function StrategyBuilder() {
   const navigate = useNavigate();
@@ -322,6 +465,7 @@ export default function StrategyBuilder() {
   const [strategiesLoaded, setStrategiesLoaded] = useState(false);
   const [form, setForm] = useState(null);
   const [games, setGames] = useState([]);
+  const [contextMap, setContextMap] = useState(null);
   const [loadingOdds, setLoadingOdds] = useState(true);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -375,11 +519,39 @@ export default function StrategyBuilder() {
       .finally(() => setLoadingOdds(false));
   }, []);
 
+  // Fetch game-context enrichment (weather, rest, injuries, records, FPI).
+  // Cached client-side for 15 min; server has its own 30-min Redis cache.
+  useEffect(() => {
+    const CTX_KEY = "oddsy_context_cache";
+    const CTX_TTL = 15 * 60 * 1000;
+    try {
+      const cached = localStorage.getItem(CTX_KEY);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < CTX_TTL && data && typeof data === "object") {
+          setContextMap(data);
+          return;
+        }
+      }
+    } catch {}
+    fetch("/api/game-context")
+      .then(r => (r.ok ? r.json() : null))
+      .then(json => {
+        if (json?.games) {
+          setContextMap(json.games);
+          try {
+            localStorage.setItem(CTX_KEY, JSON.stringify({ data: json.games, timestamp: Date.now() }));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Live preview — re-evaluates as the user tweaks controls
   const preview = useMemo(() => {
     if (!form) return [];
-    return evaluateStrategy(form, games);
-  }, [form, games]);
+    return evaluateStrategy(form, games, contextMap);
+  }, [form, games, contextMap]);
 
   const handleSave = async () => {
     if (!form || !form.name?.trim()) return;
@@ -474,7 +646,7 @@ export default function StrategyBuilder() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {strategies.map(s => {
-              const matches = evaluateStrategy(s, games);
+              const matches = evaluateStrategy(s, games, contextMap);
               return (
                 <button key={s.id} onClick={() => navigate(`/strategy-builder/${s.id}`)} style={{
                   background: "#fff", border: "1px solid #e2e5ea", borderLeft: "3px solid #7c3aed",
@@ -733,6 +905,104 @@ export default function StrategyBuilder() {
               </div>
             </Section>
           </div>
+
+          {/* ── Game-context filters (weather, rest, injuries, records, FPI) ── */}
+          <div style={{ borderTop: "1px solid #e2e5ea", margin: "8px 0 18px" }} />
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", marginBottom: 4, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            Game context
+          </div>
+          <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 12, lineHeight: 1.5 }}>
+            Each filter has three modes: <strong>Off</strong>, <strong>Skip if</strong> (reject when condition met),
+            and <strong>Only if</strong> (require condition). Mix & match — e.g., <em>Only high wind + Only FPI underdog</em>.
+          </div>
+
+          <TriFilter
+            title={`Wind speed`}
+            info="Outdoor NFL/MLB only. Condition = wind at/above threshold. 'Only' lets you specifically target windy games (fade totals, back defense)."
+            mode={form.windMode}
+            onMode={(m) => updateForm({ windMode: m })}
+            conditionLabel={`wind ≥ ${form.windMphThreshold} mph`}
+            thresholdUi={
+              <input type="range" min="0" max="40" step="1"
+                value={form.windMphThreshold}
+                onChange={e => updateForm({ windMphThreshold: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            }
+          />
+
+          <TriFilter
+            title="Temperature"
+            info="Outdoor NFL/MLB only. Condition = temp below threshold. 'Only' targets cold-weather games."
+            mode={form.tempMode}
+            onMode={(m) => updateForm({ tempMode: m })}
+            conditionLabel={`temp < ${form.tempFThreshold}°F`}
+            thresholdUi={
+              <input type="range" min="0" max="60" step="1"
+                value={form.tempFThreshold}
+                onChange={e => updateForm({ tempFThreshold: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            }
+          />
+
+          <TriFilter
+            title="Precipitation"
+            info="Outdoor only. Condition = ≥50% precip probability. 'Only' targets rainy/snowy games."
+            mode={form.precipMode}
+            onMode={(m) => updateForm({ precipMode: m })}
+            conditionLabel="wet game (≥50% rain/snow)"
+            thresholdUi={null}
+          />
+
+          <TriFilter
+            title="Rest days"
+            info="Condition = BOTH teams have at least the threshold days of rest. 'Only' targets tired teams by using 'Skip' with a high threshold, or fade back-to-backs with 'Only' + 1 day."
+            mode={form.restMode}
+            onMode={(m) => updateForm({ restMode: m })}
+            conditionLabel={`both rested ≥ ${form.restDaysThreshold} days`}
+            thresholdUi={
+              <input type="range" min="1" max="7" step="1"
+                value={form.restDaysThreshold}
+                onChange={e => updateForm({ restDaysThreshold: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            }
+          />
+
+          <TriFilter
+            title="Team win %"
+            info="Moneyline + spreads only. Condition = the team you're betting on has win% ≥ threshold. 'Only' targets winners; 'Skip' fades them (look for underdog value)."
+            mode={form.winPctMode}
+            onMode={(m) => updateForm({ winPctMode: m })}
+            conditionLabel={`team win% ≥ ${form.teamWinPctThreshold}%`}
+            thresholdUi={
+              <input type="range" min="30" max="80" step="5"
+                value={form.teamWinPctThreshold}
+                onChange={e => updateForm({ teamWinPctThreshold: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            }
+          />
+
+          <TriFilter
+            title="FPI / BPI edge"
+            info="NFL + NBA. Condition = team you're backing has FPI advantage ≥ threshold. 'Only' targets power-rated favorites; 'Skip' targets FPI underdogs (the contrarian play)."
+            mode={form.fpiMode}
+            onMode={(m) => updateForm({ fpiMode: m })}
+            conditionLabel={`FPI edge ≥ ${form.fpiEdgeThreshold}`}
+            thresholdUi={
+              <input type="range" min="0" max="15" step="1"
+                value={form.fpiEdgeThreshold}
+                onChange={e => updateForm({ fpiEdgeThreshold: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            }
+          />
+
+          <TriFilter
+            title="Key injuries"
+            info="NFL + NBA. Condition = ESPN lists any player as Out or on IR on either team. 'Only' = target injury-depleted games."
+            mode={form.injuryMode}
+            onMode={(m) => updateForm({ injuryMode: m })}
+            conditionLabel="key player out"
+            thresholdUi={null}
+          />
 
           {/* ── Notifications ─────────────────────────────── */}
           <div style={{ borderTop: "1px solid #e2e5ea", margin: "8px 0 18px" }} />

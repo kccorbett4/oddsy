@@ -19,8 +19,31 @@ const median = (a) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-function evaluateStrategy(strategy, games) {
+const ctxKey = (g) => `${g.sport_key}:${g.away_team}@${g.home_team}`;
+
+// Mirror of normalizeGameCtxFilters in StrategyBuilder.jsx — migrates older
+// strategies that stored one-way exclude flags into the new tri-state mode shape.
+function normalizeCtx(s) {
+  const o = { ...s };
+  if (o.windMode === undefined) { o.windMode = (o.maxWindMph || 0) > 0 ? "skip" : "off"; o.windMphThreshold = o.windMphThreshold ?? (o.maxWindMph || 15); }
+  if (o.tempMode === undefined) { o.tempMode = (o.minTempF || 0) > 0 ? "skip" : "off"; o.tempFThreshold = o.tempFThreshold ?? (o.minTempF || 32); }
+  if (o.precipMode === undefined) o.precipMode = o.excludeWetGames ? "skip" : "off";
+  if (o.restMode === undefined) { o.restMode = (o.minRestDays || 0) > 0 ? "skip" : "off"; o.restDaysThreshold = o.restDaysThreshold ?? (o.minRestDays || 2); }
+  if (o.winPctMode === undefined) { o.winPctMode = (o.minTeamWinPct || 0) > 0 ? "skip" : "off"; o.teamWinPctThreshold = o.teamWinPctThreshold ?? (o.minTeamWinPct || 60); }
+  if (o.fpiMode === undefined) { o.fpiMode = (o.minFpiEdge || 0) > 0 ? "skip" : "off"; o.fpiEdgeThreshold = o.fpiEdgeThreshold ?? (o.minFpiEdge || 3); }
+  if (o.injuryMode === undefined) o.injuryMode = o.excludeKeyInjuries ? "skip" : "off";
+  return o;
+}
+
+const gateFails = (mode, cond) => {
+  if (mode === "skip") return cond;
+  if (mode === "only") return !cond;
+  return false;
+};
+
+function evaluateStrategy(strategy, games, contextMap = null) {
   if (!games?.length) return [];
+  strategy = normalizeCtx(strategy);
   const out = [];
   const now = Date.now();
   const cutoff = now + (strategy.hoursWindow || 48) * 3600 * 1000;
@@ -43,6 +66,42 @@ function evaluateStrategy(strategy, games) {
     if (strategy.timeOfDay === "primetime" && !isPrimetime) continue;
     if (strategy.timeOfDay === "latenight" && !isLateNight) continue;
     if (strategy.excludePrimetime && isPrimetime) continue;
+
+    const ctx = contextMap ? contextMap[ctxKey(game)] : null;
+    const needsCtx = strategy.windMode !== "off" || strategy.tempMode !== "off"
+      || strategy.precipMode !== "off" || strategy.restMode !== "off"
+      || strategy.injuryMode !== "off";
+    if (needsCtx && !ctx) continue;
+    if (ctx) {
+      const w = ctx.weather;
+      const outdoorCheckable = w && ctx.outdoor;
+      if (strategy.windMode !== "off") {
+        if (!outdoorCheckable) continue;
+        const cond = typeof w.windMph === "number" && w.windMph >= strategy.windMphThreshold;
+        if (gateFails(strategy.windMode, cond)) continue;
+      }
+      if (strategy.tempMode !== "off") {
+        if (!outdoorCheckable) continue;
+        const cond = typeof w.tempF === "number" && w.tempF < strategy.tempFThreshold;
+        if (gateFails(strategy.tempMode, cond)) continue;
+      }
+      if (strategy.precipMode !== "off") {
+        if (!outdoorCheckable) continue;
+        const cond = typeof w.precipProb === "number" && w.precipProb >= 50;
+        if (gateFails(strategy.precipMode, cond)) continue;
+      }
+      if (strategy.restMode !== "off") {
+        const hr = ctx.homeRestDays, ar = ctx.awayRestDays;
+        if (hr == null || ar == null) continue;
+        const cond = hr >= strategy.restDaysThreshold && ar >= strategy.restDaysThreshold;
+        if (gateFails(strategy.restMode, cond)) continue;
+      }
+      if (strategy.injuryMode !== "off") {
+        const anyOut = (list) => Array.isArray(list) && list.some(p => p.status === "Out" || p.status === "Injured Reserve");
+        const cond = anyOut(ctx.homeInjuries) || anyOut(ctx.awayInjuries);
+        if (gateFails(strategy.injuryMode, cond)) continue;
+      }
+    }
 
     for (const marketType of strategy.markets) {
       const perOutcomeFair = {};
@@ -82,10 +141,28 @@ function evaluateStrategy(strategy, games) {
           if (outcome.bookVig > maxVig) continue;
           if (strategy.side === "fav" && outcome.price >= 0) continue;
           if (strategy.side === "dog" && outcome.price <= 0) continue;
-          if (strategy.location !== "any" && (marketType === "h2h" || marketType === "spreads")) {
+          if (marketType === "h2h" || marketType === "spreads") {
             const isHome = outcome.name === game.home_team;
             if (strategy.location === "home" && !isHome) continue;
             if (strategy.location === "away" && isHome) continue;
+
+            if (strategy.winPctMode !== "off") {
+              if (!ctx) continue;
+              const teamRec = isHome ? ctx.homeRecord : ctx.awayRecord;
+              if (!teamRec || typeof teamRec.winPct !== "number") continue;
+              const cond = teamRec.winPct * 100 >= strategy.teamWinPctThreshold;
+              if (gateFails(strategy.winPctMode, cond)) continue;
+            }
+            if (strategy.fpiMode !== "off") {
+              if (!ctx) continue;
+              const teamFPI = isHome ? ctx.homeFPI : ctx.awayFPI;
+              const oppFPI = isHome ? ctx.awayFPI : ctx.homeFPI;
+              if (typeof teamFPI !== "number" || typeof oppFPI !== "number") continue;
+              const cond = teamFPI - oppFPI >= strategy.fpiEdgeThreshold;
+              if (gateFails(strategy.fpiMode, cond)) continue;
+            }
+          } else if (strategy.winPctMode !== "off" || strategy.fpiMode !== "off") {
+            continue;
           }
           if (marketType === "totals" && typeof outcome.point === "number") {
             if (outcome.point < (strategy.totalMin ?? 0) || outcome.point > (strategy.totalMax ?? 9999)) continue;
@@ -169,6 +246,17 @@ async function fetchGames(baseUrl) {
   return j.games || [];
 }
 
+async function fetchGameContext(baseUrl) {
+  try {
+    const r = await fetch(`${baseUrl}/api/game-context`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.games || null;
+  } catch {
+    return null;
+  }
+}
+
 async function sendEmail({ to, subject, html }) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.NOTIFY_FROM || "Oddsy Alerts <onboarding@resend.dev>";
@@ -200,7 +288,10 @@ export default async function handler(req, res) {
     if (active.length === 0) return res.status(200).json({ ok: true, strategies: 0 });
 
     const siteUrl = process.env.SITE_URL || "https://myoddsy.com";
-    const games = await fetchGames(siteUrl);
+    const [games, contextMap] = await Promise.all([
+      fetchGames(siteUrl),
+      fetchGameContext(siteUrl),
+    ]);
 
     redis = createRedis({ url: process.env.REDIS_URL });
     await redis.connect();
@@ -208,7 +299,7 @@ export default async function handler(req, res) {
     const emailed = [];
     for (const row of active) {
       const strategy = { id: row.id, name: row.name, ...(row.config || {}) };
-      const picks = evaluateStrategy(strategy, games);
+      const picks = evaluateStrategy(strategy, games, contextMap);
       if (picks.length === 0) continue;
 
       // Dedupe per strategy — don't re-email picks we've already sent

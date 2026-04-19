@@ -49,6 +49,14 @@ const BOOK_URLS = {
 };
 
 
+// Reject any single-pick odds more extreme than ±1500. Real pregame edges
+// live in ±500; anything wider is almost always live-game noise or a book
+// pricing a near-decided outcome. NOT applied to parlays — parlay legs get
+// combined so a rare extreme leg doesn't produce runaway payouts the way
+// a single-pick edge would.
+const EXTREME_ODDS = 1500;
+const isExtremeOdds = (price) => Math.abs(price) > EXTREME_ODDS;
+
 // Calculate implied probability from American odds
 const impliedProb = (odds) => {
   if (odds > 0) return 100 / (odds + 100);
@@ -292,11 +300,10 @@ const findSharpPlays = (games, liveScores) => {
 
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    // Only skip games we know are finished or blowouts
-    if (status === "final" || status === "blowout") return;
-    // Skip confirmed live games (sharp plays are pre-game)
-    if (status === "in_progress") return;
-    // For "live_unknown" — the game may have started but we can't confirm, include it
+    // Exclude finished, blowout, and any live games (both confirmed in_progress
+    // and unconfirmed live_unknown). Live lines are too noisy — they produce
+    // phantom "edges" from books pulling lines at different times.
+    if (status === "final" || status === "blowout" || status === "in_progress" || status === "live_unknown") return;
 
     const marketTypes = ["h2h", "spreads", "totals"];
     marketTypes.forEach(marketType => {
@@ -311,6 +318,7 @@ const findSharpPlays = (games, liveScores) => {
         const vigFreeProb = median(fairProbs);
 
         outcomes.forEach(outcome => {
+          if (isExtremeOdds(outcome.price)) return;
           const thisProb = impliedProb(outcome.price);
           const ev = calcEV(outcome.price, vigFreeProb);
           if (ev <= 0) return;
@@ -404,8 +412,10 @@ const findStaleLines = (games, liveScores) => {
   const stale = [];
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    if (status === "final" || status === "blowout") return;
-    const isLive = status === "in_progress";
+    // Exclude live games entirely — stale-line detection requires comparable
+    // pregame lines. Live books pull or freeze lines at different times,
+    // producing phantom "stale" signals.
+    if (status === "final" || status === "blowout" || status === "in_progress" || status === "live_unknown") return;
 
     ["h2h", "spreads", "totals"].forEach(marketType => {
       const allOutcomes = {};
@@ -426,6 +436,7 @@ const findStaleLines = (games, liveScores) => {
         const median = sorted[Math.floor(sorted.length / 2)];
 
         outcomes.forEach(outcome => {
+          if (isExtremeOdds(outcome.price)) return;
           const diff = Math.abs(outcome.price - median);
           const booksAtMedian = prices.filter(p => Math.abs(p - median) < 10).length;
           const consensusRatio = booksAtMedian / prices.length;
@@ -435,7 +446,7 @@ const findStaleLines = (games, liveScores) => {
             const staleScore = (diff / 100) * consensusRatio * 10;
             const isBetterOdds = outcome.price > median; // better for bettor
             stale.push({
-              game, marketType, isLive,
+              game, marketType,
               outcome: outcome.name,
               point: outcome.point,
               staleBook: outcome.book,
@@ -467,7 +478,10 @@ const findRLMPlays = (games, liveScores) => {
   const plays = [];
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    if (status === "final" || status === "blowout" || status === "in_progress") return;
+    // Exclude all live + finished games. RLM requires pregame line movement
+    // across a reasonable window; live markets toggle too rapidly for this
+    // heuristic to be meaningful.
+    if (status === "final" || status === "blowout" || status === "in_progress" || status === "live_unknown") return;
 
     ["spreads", "h2h"].forEach(marketType => {
       const allOutcomes = {};
@@ -498,6 +512,7 @@ const findRLMPlays = (games, liveScores) => {
           // Sharp books have lower odds (took action and adjusted)
           // Public books still have higher odds (haven't adjusted)
           const bestPublicOdds = publicSide.reduce((best, o) => o.price > best.price ? o : best, publicSide[0]);
+          if (isExtremeOdds(bestPublicOdds.price)) return;
           const avgSharp = sharpSide.reduce((a, o) => a + o.price, 0) / sharpSide.length;
           const rlmScore = ((bestPublicOdds.price - avgSharp) / 100) * (publicSide.length / outcomes.length) * 10;
 
@@ -679,7 +694,7 @@ const findNarrativePlays = (games, liveScores) => {
   // Find upcoming games featuring blowout losers
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    if (status === "final" || status === "blowout" || status === "in_progress") return;
+    if (status === "final" || status === "blowout" || status === "in_progress" || status === "live_unknown") return;
 
     const homeNorm = game.home_team.toLowerCase();
     const awayNorm = game.away_team.toLowerCase();
@@ -728,6 +743,7 @@ const findNarrativePlays = (games, liveScores) => {
     })[0];
 
     if (bestSpread.point > 0) {
+      if (isExtremeOdds(bestSpread.price)) return;
       // They're an underdog — this is the narrative regression play
       plays.push({
         game,
@@ -1260,6 +1276,7 @@ const AlertBuilder = ({ onClose }) => {
 
 export default function App() {
   const [games, setGames] = useState([]);
+  const [gameContextMap, setGameContextMap] = useState(null);
   const [valueBets, setValueBets] = useState([]);
   const [activeSport, setActiveSport] = useState("all");
   const location = useLocation();
@@ -1577,6 +1594,26 @@ export default function App() {
       odds: p.bestOdds,
       book: p.bestBook,
     }));
+    // Safe parlays — track each leg as its own pick under "safe_parlay" so
+    // the resolver can score it with existing single-game logic. Leg-level
+    // hit rate is what users see in the Record tab.
+    parlays.forEach(parlay => {
+      parlay.legs.forEach(leg => {
+        picks.push({
+          strategy: "safe_parlay",
+          gameId: leg.game.id,
+          homeTeam: leg.game.home_team,
+          awayTeam: leg.game.away_team,
+          sportKey: leg.game.sport_key,
+          commenceTime: leg.game.commence_time || leg.commence,
+          marketType: leg.marketType,
+          outcome: leg.outcome,
+          point: leg.point ?? null,
+          odds: leg.odds,
+          book: leg.book || "",
+        });
+      });
+    });
 
     if (picks.length > 0) {
       fetch("/api/track-save", {
@@ -1585,7 +1622,7 @@ export default function App() {
         body: JSON.stringify({ picks }),
       }).catch(() => {});
     }
-  }, [sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
+  }, [sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays, parlays]);
 
   // Custom user-defined strategies — only run for the signed-in user. Each
   // strategy is evaluated against the live odds and matching picks are saved
@@ -1600,7 +1637,7 @@ export default function App() {
         if (cancelled || !customStrategies.length) return;
         const picks = [];
         customStrategies.forEach(strat => {
-          const matches = evaluateStrategy(strat, games);
+          const matches = evaluateStrategy(strat, games, gameContextMap);
           matches.forEach(m => picks.push({
             strategy: `custom_${strat.id}`,
             gameId: m.game.id,
@@ -1625,7 +1662,33 @@ export default function App() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [user, games, sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
+  }, [user, games, gameContextMap, sharpPlays, valueBets, staleLines, rlmPlays, correlatedParlays, narrativePlays]);
+
+  // Fetch /api/game-context once per session (15-min client cache).
+  // Used by custom-strategy evaluator so weather/rest/injury filters apply.
+  useEffect(() => {
+    const CTX_KEY = "oddsy_context_cache";
+    const CTX_TTL = 15 * 60 * 1000;
+    try {
+      const cached = localStorage.getItem(CTX_KEY);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < CTX_TTL && data && typeof data === "object") {
+          setGameContextMap(data);
+          return;
+        }
+      }
+    } catch {}
+    fetch("/api/game-context")
+      .then(r => (r.ok ? r.json() : null))
+      .then(json => {
+        if (json?.games) {
+          setGameContextMap(json.games);
+          try { localStorage.setItem(CTX_KEY, JSON.stringify({ data: json.games, timestamp: Date.now() })); } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const filteredGames = games.filter(g => {
     const sportMatch = activeSport === "all" || g.sport_key === activeSport;
@@ -1861,34 +1924,53 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Live stats strip */}
+              {/* Live stats strip — each card is a shortcut to its tab */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
                 gap: 10, marginBottom: 16,
               }}>
-                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Live Picks</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>{totalPlays}</div>
-                  <div style={{ fontSize: 10, color: "#8b919a" }}>across 5 strategies</div>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Parlays</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: "#7c3aed", fontFamily: "'Space Mono', monospace" }}>{totalParlays}</div>
-                  <div style={{ fontSize: 10, color: "#8b919a" }}>built for today</div>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Games On Board</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: "#1a1d23", fontFamily: "'Space Mono', monospace" }}>{games.length}</div>
-                  <div style={{ fontSize: 10, color: "#8b919a" }}>priced across books</div>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tracked ROI</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: overallRoi === null ? "#8b919a" : overallRoi >= 0 ? "#0d9f4f" : "#e8a100", fontFamily: "'Space Mono', monospace" }}>
-                    {overallRoi === null ? "—" : `${overallRoi >= 0 ? "+" : ""}${overallRoi.toFixed(1)}%`}
-                  </div>
-                  <div style={{ fontSize: 10, color: "#8b919a" }}>{totalUnits >= 0 ? "+" : ""}{totalUnits.toFixed(1)}u · {decidedCount} settled</div>
-                </div>
+                {(() => {
+                  const statCardStyle = {
+                    background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
+                    padding: "12px 14px", textAlign: "left", fontFamily: "inherit",
+                    cursor: "pointer", transition: "border-color 120ms, box-shadow 120ms",
+                  };
+                  const onHoverIn = (e) => {
+                    e.currentTarget.style.borderColor = "#cbd5e0";
+                    e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+                  };
+                  const onHoverOut = (e) => {
+                    e.currentTarget.style.borderColor = "#e2e5ea";
+                    e.currentTarget.style.boxShadow = "none";
+                  };
+                  return (
+                    <>
+                      <button onClick={() => setActiveTab("picks")} onMouseEnter={onHoverIn} onMouseLeave={onHoverOut} style={statCardStyle} aria-label="Open Picks">
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Live Picks</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: "#1a73e8", fontFamily: "'Space Mono', monospace" }}>{totalPlays}</div>
+                        <div style={{ fontSize: 10, color: "#8b919a" }}>across 5 strategies</div>
+                      </button>
+                      <button onClick={() => setActiveTab("parlays")} onMouseEnter={onHoverIn} onMouseLeave={onHoverOut} style={statCardStyle} aria-label="Open Parlays">
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Parlays</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: "#7c3aed", fontFamily: "'Space Mono', monospace" }}>{totalParlays}</div>
+                        <div style={{ fontSize: 10, color: "#8b919a" }}>built for today</div>
+                      </button>
+                      <button onClick={() => setActiveTab("games")} onMouseEnter={onHoverIn} onMouseLeave={onHoverOut} style={statCardStyle} aria-label="Open Games">
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Games On Board</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: "#1a1d23", fontFamily: "'Space Mono', monospace" }}>{games.length}</div>
+                        <div style={{ fontSize: 10, color: "#8b919a" }}>priced across books</div>
+                      </button>
+                      <button onClick={() => setActiveTab("record")} onMouseEnter={onHoverIn} onMouseLeave={onHoverOut} style={statCardStyle} aria-label="Open Track Record">
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tracked ROI</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: overallRoi === null ? "#8b919a" : overallRoi >= 0 ? "#0d9f4f" : "#e8a100", fontFamily: "'Space Mono', monospace" }}>
+                          {overallRoi === null ? "—" : `${overallRoi >= 0 ? "+" : ""}${overallRoi.toFixed(1)}%`}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#8b919a" }}>{totalUnits >= 0 ? "+" : ""}{totalUnits.toFixed(1)}u · {decidedCount} settled</div>
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Strategy Builder — dedicated spotlight card */}
@@ -1914,7 +1996,7 @@ export default function App() {
                     Build your own betting strategy.
                   </div>
                   <div style={{ fontSize: 13, color: "#e9d8fd", lineHeight: 1.5, marginBottom: 12 }}>
-                    Define your own filters — sports, markets, min EV, odds range — and we'll track its performance live. {isMobile ? "" : "No other tool lets you do this."}
+                    20+ filters — sports, markets, EV threshold, odds range, spread & total ranges, days of week, time of day, book disagreement, vig, weather (wind/temp/precip), rest days, team win %, FPI edge, injuries — plus daily email alerts. We track every strategy's performance live. {isMobile ? "" : "No other tool lets you do this."}
                   </div>
                   <div style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
@@ -2106,13 +2188,29 @@ export default function App() {
             edgeLabel: `+${p.bestSpread} spread`,
           }));
 
-          const filtered = normalized.filter(p =>
+          // Dedupe across detectors. The same game+outcome often trips Sharp
+          // *and* Stale *and* RLM — keep only the highest-scoring pick per
+          // (gameId, marketType, outcome, point). Sort first so reduce sees
+          // the winner first.
+          const deduped = [];
+          const seenKeys = new Set();
+          normalized
+            .sort((a, b) => (b.sortKey || 0) - (a.sortKey || 0))
+            .forEach(p => {
+              const gid = p.game?.id || `${p.game?.sport_key}:${p.game?.away_team}@${p.game?.home_team}`;
+              const key = `${gid}|${p.marketLabel}|${p.title}`;
+              if (seenKeys.has(key)) return;
+              seenKeys.add(key);
+              deduped.push(p);
+            });
+
+          const filtered = deduped.filter(p =>
             (pickFilter === "all" || pickFilter === p.kind) &&
             (activeSport === "all" || p.game?.sport_key === activeSport)
-          ).sort((a, b) => (b.sortKey || 0) - (a.sortKey || 0));
+          );
 
           const chips = [
-            { id: "all", label: "All Picks", count: normalized.length, color: "#1a1d23" },
+            { id: "all", label: "All Picks", count: deduped.length, color: "#1a1d23" },
             { id: "sharp", label: "🧠 Sharp", count: sharpPlays.length, color: "#1a73e8" },
             { id: "value", label: "⚡ Value", count: valueBets.length, color: "#0d9f4f" },
             { id: "stale", label: "⏱️ Stale", count: staleLines.length, color: "#dc2626" },
@@ -2400,6 +2498,7 @@ export default function App() {
         {/* ── SAFE PARLAYS ── */}
         {activeTab === "parlays" && parlaySub === "safe" && (
           <>
+            <PerformanceBanner stats={strategyStats.safe_parlay} label="Safe Parlays (leg hit rate)" />
             {/* Parlay explainer */}
             <div style={{
               background: "#f3edff",
@@ -2796,6 +2895,8 @@ export default function App() {
               desc: "Sharp books moved, public books didn't — bet the public price." },
             { id: "correlated", label: "Correlated Parlays", color: "#16a34a", icon: "🔗",
               desc: "Same-game legs that are statistically linked — books underprice the correlation." },
+            { id: "safe_parlay", label: "Safe Parlays", color: "#0891b2", icon: "🛡️",
+              desc: "Legs from our auto-built 3-leg +EV parlays — leg-level hit rate." },
             { id: "narrative", label: "Narrative Regression", color: "#d97706", icon: "📉",
               desc: "Fade the overreaction after a blowout loss." },
           ];
