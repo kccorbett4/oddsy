@@ -186,6 +186,67 @@ function findSavant(savant, mlbamId) {
   return savant?.[mlbamId] || savant?.[String(mlbamId)] || null;
 }
 
+// Build a handful of realistic recommended parlays from the projection
+// pool. "Realistic" here means every leg is priced at ≤ maxAmerican
+// (default +1000, so no lottery tickets), no two legs share a game
+// (correlation), and the final combo still carries non-negative modeled
+// EV. Enumerates combos sized per legsSizes (default [2, 3]) and returns
+// a few named slots so the UI can label them.
+export function buildRecommendedParlays(projections, {
+  maxAmerican = 1000,
+  legsSizes = [2, 3],
+  poolSize = 12,
+} = {}) {
+  const pool = projections
+    .filter(p => p.bestAmerican != null && p.bestAmerican <= maxAmerican && p.modelProb > 0)
+    .sort((a, b) => b.evPct - a.evPct)
+    .slice(0, poolSize);
+  if (pool.length < 2) return [];
+
+  const gameOf = (p) => `${p.game.home}@${p.game.away}`;
+  const score = (legs) => {
+    const prob = legs.reduce((a, l) => a * l.modelProb, 1);
+    const dec = legs.reduce((a, l) => a * l.bestDecimal, 1);
+    const ev = (prob * (dec - 1) - (1 - prob)) * 100;
+    return { legs, size: legs.length, prob, dec, american: decimalToAmerican(dec), ev };
+  };
+  const combosOfSize = (size) => {
+    const out = [];
+    const rec = (start, cur) => {
+      if (cur.length === size) { out.push(cur.slice()); return; }
+      for (let i = start; i < pool.length; i++) {
+        const p = pool[i];
+        if (cur.some(q => gameOf(q) === gameOf(p))) continue;
+        cur.push(p); rec(i + 1, cur); cur.pop();
+      }
+    };
+    rec(0, []);
+    return out;
+  };
+
+  const scoredBySize = {};
+  for (const sz of legsSizes) {
+    scoredBySize[sz] = combosOfSize(sz).map(score).filter(s => s.ev >= 0);
+  }
+
+  const picks = [];
+  if (scoredBySize[2]?.length) {
+    const safer = [...scoredBySize[2]].sort((a, b) => b.prob - a.prob)[0];
+    const value = [...scoredBySize[2]].sort((a, b) => b.ev - a.ev)[0];
+    if (safer) picks.push({ label: "Safer 2-leg", subtitle: "Highest hit rate among +EV pairs", ...safer });
+    if (value && value.legs !== safer?.legs) picks.push({ label: "Value 2-leg", subtitle: "Best model edge at 2 legs", ...value });
+  }
+  if (scoredBySize[3]?.length) {
+    const swing = [...scoredBySize[3]].sort((a, b) => b.ev - a.ev)[0];
+    if (swing) picks.push({ label: "Swing 3-leg", subtitle: "Bigger payout, still +EV", ...swing });
+  }
+  if (scoredBySize[4]?.length) {
+    const jackpot = [...scoredBySize[4]].sort((a, b) => b.ev - a.ev)[0];
+    if (jackpot) picks.push({ label: "4-leg jackpot", subtitle: "Long-shot stack with positive model edge", ...jackpot });
+  }
+  return picks;
+}
+
 // Given context + odds payloads, return sorted HR projections.
 // Each item: { name, team, opponent, game, modelProb, bestBook, bestOdds,
 //              edgePct, evPct, inputs: {batterFactor, pitcherFactor, ...} }

@@ -13,6 +13,7 @@ import StaleLineDetectorPage from './seo-pages/StaleLineDetectorPage.jsx'
 import NarrativeRegressionPage from './seo-pages/NarrativeRegressionPage.jsx'
 import ShopPage from './ShopPage.jsx'
 import HomeRunsPage from './HomeRunsPage.jsx'
+import HrParlaysPage from './HrParlaysPage.jsx'
 
 export default function AppRoutes() {
   return (
@@ -36,6 +37,7 @@ export default function AppRoutes() {
 
       {/* Home run prop hunter */}
       <Route path="/homeruns" element={<HomeRunsPage />} />
+      <Route path="/homeruns/parlays" element={<HrParlaysPage />} />
 
       {/* SEO landing pages */}
       <Route path="/ev-betting" element={<EvBettingPage />} />

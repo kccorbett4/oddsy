@@ -18,64 +18,6 @@ const formatTime = (iso) => {
   return d.toLocaleTimeString("en-US", opts);
 };
 
-// Build a handful of realistic recommended parlays from the projection
-// pool. "Realistic" here means every leg is priced at ≤ +1000 (so no
-// lottery tickets), no two legs share a game (correlation), and the
-// final combo still carries non-negative modeled EV.
-// Returns up to 3 suggestions: safer 2-leg (highest combined prob),
-// value 2-leg (best EV), and a 3-leg swing bet (best EV).
-function buildRecommendedParlays(projections) {
-  const MAX_ODDS = 1000;
-  const pool = projections
-    .filter(p => p.bestAmerican != null && p.bestAmerican <= MAX_ODDS && p.modelProb > 0)
-    .sort((a, b) => b.evPct - a.evPct)
-    .slice(0, 12); // top-12 candidates to keep combo enumeration small
-
-  if (pool.length < 2) return [];
-
-  const gameOf = (p) => `${p.game.home}@${p.game.away}`;
-
-  const combos2 = [];
-  for (let i = 0; i < pool.length; i++) {
-    for (let j = i + 1; j < pool.length; j++) {
-      if (gameOf(pool[i]) === gameOf(pool[j])) continue;
-      combos2.push([pool[i], pool[j]]);
-    }
-  }
-  const combos3 = [];
-  for (let i = 0; i < pool.length; i++) {
-    for (let j = i + 1; j < pool.length; j++) {
-      if (gameOf(pool[i]) === gameOf(pool[j])) continue;
-      for (let k = j + 1; k < pool.length; k++) {
-        if (gameOf(pool[i]) === gameOf(pool[k])) continue;
-        if (gameOf(pool[j]) === gameOf(pool[k])) continue;
-        combos3.push([pool[i], pool[j], pool[k]]);
-      }
-    }
-  }
-
-  const score = (legs) => {
-    const prob = legs.reduce((a, l) => a * l.modelProb, 1);
-    const dec = legs.reduce((a, l) => a * l.bestDecimal, 1);
-    const ev = (prob * (dec - 1) - (1 - prob)) * 100;
-    return { legs, prob, dec, american: decimalToAmerican(dec), ev };
-  };
-
-  const scored2 = combos2.map(score).filter(s => s.ev >= 0);
-  const scored3 = combos3.map(score).filter(s => s.ev >= 0);
-  if (scored2.length === 0 && scored3.length === 0) return [];
-
-  const safer = [...scored2].sort((a, b) => b.prob - a.prob)[0] || null;
-  const value = [...scored2].sort((a, b) => b.ev - a.ev)[0] || null;
-  const swing = [...scored3].sort((a, b) => b.ev - a.ev)[0] || null;
-
-  const out = [];
-  if (safer) out.push({ label: "Safer 2-leg", subtitle: "Highest hit rate among +EV pairs", ...safer });
-  if (value && value !== safer) out.push({ label: "Value 2-leg", subtitle: "Best model edge at 2 legs", ...value });
-  if (swing) out.push({ label: "Swing 3-leg", subtitle: "Bigger payout, still +EV", ...swing });
-  return out;
-}
-
 // Wind cardinal label relative to CF ("toward CF" / "crosswind" / "in from CF")
 function windLabel(windDirDeg, windMph, cfBearing) {
   if (windDirDeg == null || windMph == null || cfBearing == null) return null;
@@ -137,7 +79,18 @@ export default function HomeRunsPage() {
     return [...s].sort();
   }, [projections]);
 
-  const recommended = useMemo(() => buildRecommendedParlays(projections), [projections]);
+  // Hydrate parlay legs from the /homeruns/parlays page handoff. Runs
+  // once per mount; the preload is cleared so a later visit starts fresh.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("hrParlayPreload");
+      if (raw) {
+        const legs = JSON.parse(raw);
+        if (Array.isArray(legs) && legs.length > 0) setParlayLegs(legs);
+        sessionStorage.removeItem("hrParlayPreload");
+      }
+    } catch {}
+  }, []);
 
   const filtered = useMemo(() => {
     let rows = projections;
@@ -283,11 +236,22 @@ export default function HomeRunsPage() {
               <option value={10}>+10%</option>
             </select>
           </label>
+          <Link
+            to="/homeruns/parlays"
+            style={{
+              marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
+              border: "1px solid #4c1d95", background: "#4c1d95", color: "#fff",
+              fontSize: 12, fontWeight: 700, textDecoration: "none",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >
+            🎰 Recommended parlays →
+          </Link>
           <button
             onClick={() => { setRefreshing(true); loadData(true); }}
             disabled={refreshing}
             style={{
-              marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
+              padding: "7px 12px", borderRadius: 8,
               border: "1px solid #1a73e8", background: "#fff", color: "#1a73e8",
               fontSize: 12, fontWeight: 700, cursor: refreshing ? "wait" : "pointer",
               fontFamily: "'DM Sans', sans-serif",
@@ -308,57 +272,6 @@ export default function HomeRunsPage() {
         {error && (
           <div style={{ background: "#fee2e2", color: "#991b1b", padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 12 }}>
             Failed to load: {error}
-          </div>
-        )}
-
-        {recommended.length > 0 && !loading && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-              📋 Recommended parlays · all legs ≤ +1000
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8 }}>
-              {recommended.map((r, i) => (
-                <div key={i} style={{
-                  background: "#fff", border: "1px solid #e2e5ea", borderRadius: 10,
-                  padding: "10px 12px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23" }}>{r.label}</div>
-                    <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "'Space Mono', monospace", color: "#0d9f4f" }}>
-                      {formatOdds(r.american)}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 10, color: "#8b919a", marginBottom: 6 }}>{r.subtitle}</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
-                    {r.legs.map(l => (
-                      <div key={`${l.batterId}|${l.game.home}|${l.game.away}`} style={{
-                        display: "flex", justifyContent: "space-between", fontSize: 11, color: "#475569",
-                      }}>
-                        <span style={{ fontWeight: 600 }}>{l.name}</span>
-                        <span style={{ fontFamily: "'Space Mono', monospace" }}>{formatOdds(l.bestAmerican)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10, color: "#6b7280", marginBottom: 8 }}>
-                    <span>Model hit: <strong style={{ color: "#1a1d23" }}>{formatPct(r.prob, 1)}</strong></span>
-                    <span style={{ color: r.ev >= 0 ? "#0d9f4f" : "#dc2626", fontWeight: 700 }}>
-                      {r.ev >= 0 ? "+" : ""}{r.ev.toFixed(1)}% EV
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setParlayLegs(r.legs)}
-                    style={{
-                      width: "100%", padding: "6px 10px", borderRadius: 6,
-                      border: "1px solid #1a73e8", background: "#1a73e8", color: "#fff",
-                      fontSize: 11, fontWeight: 700, cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    Load into parlay builder
-                  </button>
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
