@@ -146,13 +146,21 @@ async function scrapeFanDuel() {
     `${base}/content-managed-page?page=CUSTOM&customPageId=mlb&pbHsa=false&pbHorizontal=false&_ak=FhMFpcPWXMeyZxOx`
   );
 
-  const events = Object.values(mlbPage?.attachments?.events || {}).map(e => ({
-    eventId: e.eventId,
-    home: e.name?.split(" @ ")?.[1] || null,
-    away: e.name?.split(" @ ")?.[0] || null,
-    commence: e.openDate,
-    name: e.name,
-  })).filter(e => e.eventId);
+  // FanDuel event names include the probable pitcher in parens, e.g.
+  // "Atlanta Braves (G Holmes) @ Philadelphia Phillies (A Painter)".
+  // We strip the trailing "(...)" so the team name matches the Odds API
+  // shape ("Atlanta Braves") in mergeScrapedIntoEvents.
+  const stripPitcher = (s) => (s || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const events = Object.values(mlbPage?.attachments?.events || {}).map(e => {
+    const parts = (e.name || "").split(" @ ");
+    return {
+      eventId: e.eventId,
+      away: stripPitcher(parts[0]) || null,
+      home: stripPitcher(parts[1]) || null,
+      commence: e.openDate,
+      name: e.name,
+    };
+  }).filter(e => e.eventId);
 
   const out = [];
   // Limit concurrent event-page calls so we don't blow through the
@@ -222,7 +230,10 @@ async function scrapeFanDuel() {
 // so name matching against Odds-API events works.
 async function scrapeBovada() {
   const base = "https://www.bovada.lv/services/sports/event/coupon/events/A/description";
-  const listUrl = `${base}/baseball/mlb?marketFilterId=def&preMatchOnly=true&eventsLimit=50&lang=en`;
+  // Drop marketFilterId=def (restricts to "default" markets — strips HR props
+  // from per-event responses) and preMatchOnly=true (was limiting the listing
+  // to the next 1–2 games). With both flags off we see the full MLB slate.
+  const listUrl = `${base}/baseball/mlb?eventsLimit=50&lang=en`;
   const list = await jfetch(listUrl);
 
   // Bovada wraps responses in an array of groups; walk everything and

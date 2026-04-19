@@ -110,6 +110,20 @@ export default async function handler(req, res) {
           if (raw) stale = JSON.parse(raw);
         } catch {}
       }
+      const hasCache = !!stale;
+      // The "arbitrage feed" is parlay-api, which is separate from the main
+      // Odds API (used everywhere else on the site). Call it out by name so
+      // users don't think the whole site's odds are broken.
+      let msg;
+      if (creditExhausted && hasCache) {
+        msg = "Arbitrage feed is paused (monthly credit cap reached). Showing last cached opportunities.";
+      } else if (creditExhausted) {
+        msg = "Arbitrage feed is paused — we've hit this month's credit cap on the arbitrage provider. It resets at the start of the next billing period.";
+      } else if (hasCache) {
+        msg = "Arbitrage feed is temporarily unreachable. Showing last cached opportunities.";
+      } else {
+        msg = "Arbitrage feed is temporarily unreachable.";
+      }
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).json({
         opportunities: stale?.opportunities || [],
@@ -117,11 +131,9 @@ export default async function handler(req, res) {
         regions,
         creditsRemaining,
         creditsUsed,
-        stale: !!stale,
-        upstreamError: creditExhausted
-          ? "Our odds provider has temporarily cut us off (credit limit reached). Showing last cached data."
-          : "Odds provider is unreachable right now.",
-        cachedAt: stale?.cachedAt || new Date().toISOString(),
+        stale: hasCache,
+        upstreamError: msg,
+        cachedAt: stale?.cachedAt || null,
       });
     }
 
