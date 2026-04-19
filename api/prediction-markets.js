@@ -82,10 +82,24 @@ function normalizePolyMarket(m) {
   else if (text.startsWith("nba-") || /\bnba\b/.test(text)) sport = "NBA";
   else if (text.startsWith("nfl-") || /\bnfl\b/.test(text)) sport = "NFL";
   else if (text.startsWith("nhl-") || /\bnhl\b/.test(text)) sport = "NHL";
+  else if (text.startsWith("wnba-") || /\bwnba\b/.test(text)) sport = "WNBA";
   else if (/\bufc\b|\bmma\b|\bfight\b|\bboxing\b/.test(text)) sport = "Fighting";
-  else if (/\bsoccer|football|\bepl\b|\bmls\b|\bchampions league\b|\bserie a\b/.test(text)) sport = "Soccer";
-  else if (/\btennis|\batp\b|\bwta\b|\bopen\b/.test(text)) sport = "Tennis";
+  else if (/\btennis|\batp\b|\bwta\b/.test(text)) sport = "Tennis";
   else if (/\bpga\b|\bgolf\b/.test(text)) sport = "Golf";
+  else if (text.startsWith("codmw-") || /\besports?\b|\bcs2\b|\bdota\b|\bleague of legends\b/.test(text)) sport = "Esports";
+  // Soccer catch-all: Polymarket's sports tag is soccer-heavy and its
+  // slugs/questions use predictable patterns ("end in a draw", "O/U X",
+  // "Spread: Team", "Will <club name> win"). Match anything that looks
+  // like a soccer matchup before falling through to "Other".
+  else if (
+    /end in a draw/.test(text)
+    || /\bspread:\s/.test(text)
+    || /\bo\/u\s+\d/.test(text)
+    || /\bboth teams to score\b/.test(text)
+    || / win on \d{4}-\d{2}-\d{2}/.test(text)
+    || /\b(fc|cf|ac|sc|afc|cfc|sv)\b/.test(text)
+    || /\bsoccer|football|\bepl\b|\bmls\b|\bla liga\b|\bserie a\b|\bchampions league\b/.test(text)
+  ) sport = "Soccer";
 
   const slug = m.slug || "";
   return {
@@ -122,11 +136,14 @@ export default async function handler(req, res) {
         inSeason.map(async s => ({ s, markets: await fetchKalshiEventsWithMarkets(s.ticker) }))
       );
       let kalshiCount = 0;
+      // Only include Kalshi markets closing within the next 72h — beyond
+      // that the book's still figuring out liquidity and it's mostly noise.
+      const cutoff = now.getTime() + 72 * 3600 * 1000;
       for (const { s, markets } of results) {
         for (const m of markets) {
           const norm = normalizeKalshiMarket(m, s.sport);
-          // Drop markets with no liveness — no prices at all
           if (norm.yesBid == null && norm.yesAsk == null && !norm.lastPrice) continue;
+          if (norm.closeTime && new Date(norm.closeTime).getTime() > cutoff) continue;
           out.markets.push(norm);
           kalshiCount++;
         }
