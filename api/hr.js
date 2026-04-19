@@ -1056,6 +1056,75 @@ async function handleDebugEventOdds(req, res) {
   });
 }
 
+// Probe The Odds API per-event HR feed for specific bookmakers. Confirms
+// whether DK/FanDuel/MGM are missing because (a) they don't post HR props
+// through this API, or (b) our region/params are wrong. Hits 3 sample
+// events and reports which books returned the `batter_home_runs` market.
+async function handleDebugHrBooks(req, res) {
+  const API_KEY = oddsApiKey();
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+
+  const booksParam = (req.query?.bookmakers || "draftkings,fanduel,betmgm,fanatics").toString();
+  const regions = (req.query?.regions || "us,us2").toString();
+  const maxEvents = Math.max(1, Math.min(5, parseInt(req.query?.maxEvents, 10) || 3));
+
+  const evList = await jsonFetch(`${ODDS_BASE}/sports/baseball_mlb/events?apiKey=${API_KEY}`);
+  if (!Array.isArray(evList)) return res.status(502).json({ error: "events list fetch failed" });
+
+  const now = Date.now();
+  const soon = evList
+    .filter(e => e.commence_time && new Date(e.commence_time).getTime() > now - 3 * 3600 * 1000)
+    .slice(0, maxEvents);
+
+  const perEvent = [];
+  let lastRemaining = null;
+  for (const ev of soon) {
+    // Test 1: with explicit bookmakers filter
+    const u1 = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
+      + `?apiKey=${API_KEY}&regions=${regions}&bookmakers=${booksParam}`
+      + `&markets=${HR_MARKET_KEY}&oddsFormat=american`;
+    const r1 = await fetch(u1);
+    lastRemaining = r1.headers.get("x-requests-remaining") || lastRemaining;
+    const j1 = r1.ok ? await r1.json() : { error: `${r1.status} ${await r1.text()}` };
+
+    // Test 2: without bookmakers filter (baseline)
+    const u2 = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
+      + `?apiKey=${API_KEY}&regions=${regions}`
+      + `&markets=${HR_MARKET_KEY}&oddsFormat=american`;
+    const r2 = await fetch(u2);
+    lastRemaining = r2.headers.get("x-requests-remaining") || lastRemaining;
+    const j2 = r2.ok ? await r2.json() : { error: `${r2.status} ${await r2.text()}` };
+
+    const summarize = (j) => {
+      if (j?.error) return { error: j.error };
+      const books = (j.bookmakers || []).map(b => ({
+        title: b.title,
+        hasHrMarket: (b.markets || []).some(m => m.key === HR_MARKET_KEY),
+        hrOutcomeCount: (b.markets || []).find(m => m.key === HR_MARKET_KEY)?.outcomes?.length || 0,
+      }));
+      return { bookCount: books.length, books };
+    };
+
+    perEvent.push({
+      eventId: ev.id,
+      matchup: `${ev.away_team} @ ${ev.home_team}`,
+      commence: ev.commence_time,
+      withBookmakersFilter: { url: u1.replace(API_KEY, "***"), ...summarize(j1) },
+      withoutFilter: { url: u2.replace(API_KEY, "***"), ...summarize(j2) },
+    });
+  }
+
+  return res.status(200).json({
+    probedMarket: HR_MARKET_KEY,
+    regions,
+    bookmakersRequested: booksParam,
+    creditsRemaining: lastRemaining,
+    eventsSampled: perEvent.length,
+    perEvent,
+    note: "If the requested books (DK/FanDuel/MGM) don't appear in either column, they aren't posting HR props through the Odds API for these events right now — not a param or plan bug. If they appear only withBookmakersFilter, the baseline call needs the filter. If they appear only withoutFilter, something is off with the filter syntax.",
+  });
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -1068,6 +1137,7 @@ export default async function handler(req, res) {
     if (action === "debug_market_keys") return await handleDebugMarketKeys(req, res);
     if (action === "debug_props_raw") return await handleDebugPropsRaw(req, res);
     if (action === "debug_event_odds") return await handleDebugEventOdds(req, res);
+    if (action === "debug_hr_books") return await handleDebugHrBooks(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
