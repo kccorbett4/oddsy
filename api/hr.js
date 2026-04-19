@@ -809,6 +809,70 @@ async function handleDebugPropsRaw(req, res) {
   }
 }
 
+// Walk parlay-api's per-event props flow: fetch the events list, then
+// hit /events/{id}/odds for each with the requested market key. This
+// mirrors how The Odds API exposes player props and surfaces any books
+// that only post HR lines via the per-event feed (not the /props catalog).
+async function handleDebugEventOdds(req, res) {
+  const API_KEY = process.env.PARLAY_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "PARLAY_API_KEY not configured" });
+  const sport = (req.query?.sport || "baseball_mlb").toString();
+  const market = (req.query?.market || "player_home_runs").toString();
+  const regions = (req.query?.regions || "us,us2").toString();
+  const maxEvents = Math.max(1, Math.min(25, parseInt(req.query?.maxEvents, 10) || 5));
+
+  const base = "https://parlay-api.com/v1";
+  const evR = await fetch(`${base}/sports/${encodeURIComponent(sport)}/events?apiKey=${API_KEY}`);
+  const remainingAfterEvents = evR.headers.get("x-requests-remaining");
+  const events = evR.ok ? await evR.json() : [];
+  if (!Array.isArray(events)) {
+    return res.status(502).json({ error: "events response not an array", remaining: remainingAfterEvents, body: events });
+  }
+
+  const pickedEvents = events.slice(0, maxEvents);
+  const perEvent = [];
+  let lastRemaining = remainingAfterEvents;
+  for (const ev of pickedEvents) {
+    const id = ev.id || ev.event_id || ev.canonical_event_id;
+    if (!id) continue;
+    const url = `${base}/sports/${encodeURIComponent(sport)}/events/${encodeURIComponent(id)}/odds`
+      + `?apiKey=${API_KEY}&regions=${regions}&markets=${market}&oddsFormat=american`;
+    const r = await fetch(url);
+    lastRemaining = r.headers.get("x-requests-remaining") || lastRemaining;
+    const text = await r.text();
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+    const books = [];
+    // Extract book list from whatever shape comes back (Odds-API-like
+    // bookmakers[] or parlay-api flat rows).
+    if (parsed && typeof parsed === "object") {
+      if (Array.isArray(parsed.bookmakers)) {
+        for (const b of parsed.bookmakers) books.push(b.title || b.key);
+      } else if (Array.isArray(parsed)) {
+        for (const row of parsed) {
+          const t = row?.bookmaker_title || row?.bookmaker;
+          if (t && !books.includes(t)) books.push(t);
+        }
+      }
+    }
+    perEvent.push({
+      id, home: ev.home_team || ev.home, away: ev.away_team || ev.away,
+      status: r.status, books, rawKeys: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : undefined,
+      sampleRow: Array.isArray(parsed) ? parsed[0] : undefined,
+    });
+  }
+
+  // Aggregate unique books across all sampled events.
+  const allBooks = {};
+  for (const ev of perEvent) for (const b of ev.books) allBooks[b] = (allBooks[b] || 0) + 1;
+
+  return res.status(200).json({
+    sport, market, regions, eventsSampled: perEvent.length, totalEvents: events.length,
+    creditsRemaining: lastRemaining,
+    booksAcrossSample: allBooks,
+    perEvent,
+  });
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -820,6 +884,7 @@ export default async function handler(req, res) {
     if (action === "healthcheck") return await handleHealthcheck(req, res);
     if (action === "debug_market_keys") return await handleDebugMarketKeys(req, res);
     if (action === "debug_props_raw") return await handleDebugPropsRaw(req, res);
+    if (action === "debug_event_odds") return await handleDebugEventOdds(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });

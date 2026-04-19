@@ -42,7 +42,7 @@ export default function ArbitragePage() {
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sport, setSport] = useState("");
+  const [sport, setSport] = useState("baseball_mlb");
   const [bankroll, setBankroll] = useState(100);
 
   const loadData = async (sportFilter = "") => {
@@ -116,8 +116,8 @@ export default function ArbitragePage() {
             onChange={e => setSport(e.target.value)}
             style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d5d8de", fontSize: 13 }}
           >
-            <option value="">All in season</option>
             <option value="baseball_mlb">MLB</option>
+            <option value="">All in season (10× credits)</option>
             <option value="basketball_nba">NBA</option>
             <option value="basketball_ncaab">NCAAB</option>
             <option value="americanfootball_nfl">NFL</option>
