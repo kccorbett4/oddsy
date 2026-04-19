@@ -98,7 +98,7 @@ export default async function handler(req, res) {
           const d = new Date(now + dateOffset * 86400000);
           const dateStr = d.toISOString().slice(0, 10).replace(/-/g, "");
           const url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${dateStr}`;
-          const response = await fetch(url);
+          const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
           if (response.ok) {
             const data = await response.json();
             (data.events || []).forEach(event => {

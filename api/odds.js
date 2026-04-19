@@ -1,5 +1,18 @@
+// Odds provider is env-toggleable so we can fall back to The Odds API if the
+// new one misbehaves. Flip ODDS_PROVIDER=theoddsapi in Vercel to revert.
+const PROVIDER = (process.env.ODDS_PROVIDER || "parlay").toLowerCase();
+
+function buildOddsUrl(sport, { apiKey, regions, markets, oddsFormat }) {
+  if (PROVIDER === "theoddsapi") {
+    return `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${apiKey}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
+  }
+  return `https://parlay-api.com/v1/sports/${sport}/odds?apiKey=${apiKey}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
+}
+
 export default async function handler(req, res) {
-  const API_KEY = process.env.ODDS_API_KEY;
+  const API_KEY = PROVIDER === "theoddsapi"
+    ? process.env.ODDS_API_KEY
+    : (process.env.PARLAY_API_KEY || process.env.ODDS_API_KEY);
 
   if (!API_KEY) {
     return res.status(500).json({ error: "API key not configured" });
@@ -39,7 +52,7 @@ export default async function handler(req, res) {
     let used = null;
 
     for (const sport of sports) {
-      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${API_KEY}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
+      const url = buildOddsUrl(sport, { apiKey: API_KEY, regions, markets, oddsFormat });
       const response = await fetch(url);
 
       remaining = response.headers.get("x-requests-remaining");
@@ -64,6 +77,7 @@ export default async function handler(req, res) {
       requestsRemaining: remaining,
       requestsUsed: used,
       sportsQueried: sports.length,
+      provider: PROVIDER,
       cachedAt: new Date().toISOString(),
     });
   } catch (err) {

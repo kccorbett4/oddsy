@@ -118,7 +118,7 @@ function recordFor(competitor, type) {
 export default async function handler(req, res) {
   const force = req.query?.force === "1";
   try {
-    const redis = await getRedis();
+    let redis = await getRedis();
     if (redis) {
       try {
         if (!force) {
