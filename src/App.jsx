@@ -1387,6 +1387,7 @@ export default function App() {
 
   const [parlaySub, setParlaySub] = useState("safe"); // safe | correlated | analyze
   const [analyzerLegs, setAnalyzerLegs] = useState([]);
+  const [analyzerSearch, setAnalyzerSearch] = useState("");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -3009,12 +3010,41 @@ export default function App() {
               {/* Leg picker */}
               <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14, padding: 16, marginBottom: 18 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Add a leg</div>
+                <div style={{ position: "relative", marginBottom: 10 }}>
+                  <input
+                    type="text"
+                    value={analyzerSearch}
+                    onChange={e => setAnalyzerSearch(e.target.value)}
+                    placeholder="Search team or matchup…"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      padding: "9px 32px 9px 12px", borderRadius: 8,
+                      border: "1px solid #e2e5ea", fontSize: 13,
+                      fontFamily: "'DM Sans', sans-serif", color: "#1a1d23",
+                      background: "#fafbfc", outline: "none",
+                    }}
+                  />
+                  {analyzerSearch && (
+                    <button onClick={() => setAnalyzerSearch("")} style={{
+                      position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                      border: "none", background: "transparent", cursor: "pointer",
+                      fontSize: 14, color: "#8b919a", padding: "2px 6px",
+                    }}>✕</button>
+                  )}
+                </div>
                 {upcoming.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#8b919a" }}>No upcoming games available.</div>
-                ) : (
+                ) : (() => {
+                  const q = analyzerSearch.trim().toLowerCase();
+                  const filtered = upcoming
+                    .filter(g => activeSport === "all" || g.sport_key === activeSport)
+                    .filter(g => !q || g.home_team?.toLowerCase().includes(q) || g.away_team?.toLowerCase().includes(q));
+                  if (filtered.length === 0) {
+                    return <div style={{ fontSize: 12, color: "#8b919a" }}>No games match “{analyzerSearch}”.</div>;
+                  }
+                  return (
                   <div style={{ maxHeight: 360, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {upcoming
-                      .filter(g => activeSport === "all" || g.sport_key === activeSport)
+                    {filtered
                       .slice(0, 40)
                       .map(game => {
                         const gameHasLeg = analyzerLegs.some(l => l.gameId === game.id);
@@ -3065,7 +3095,8 @@ export default function App() {
                         );
                       })}
                   </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Current legs */}
