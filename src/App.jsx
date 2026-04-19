@@ -164,7 +164,7 @@ const getGameStatus = (game, liveScores) => {
 // Given a game + market + outcome, return the leg's best price, book,
 // and vig-free fair probability (median across books that price it).
 // Returns null if the outcome can't be found or priced.
-const analyzeLeg = (game, marketType, outcomeName, point) => {
+const analyzeLeg = (game, marketType, outcomeName, point, preferredBook = null) => {
   if (!game) return null;
   const { perOutcomeFair, perOutcomeOffers } = collectMarketFairProbs(game, marketType);
   const pointStr = point === null || point === undefined ? "" : `${point}`;
@@ -184,14 +184,22 @@ const analyzeLeg = (game, marketType, outcomeName, point) => {
   }
   if (!fair) return null;
   const fairProb = median(fair);
-  // Best price for the bettor: highest American odds
-  const best = offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
+  // If the user is pinning to a specific book, use THAT book's price so the
+  // analyzer matches what they'd see at Bovada/DK/etc. Otherwise take best
+  // available across books.
+  let chosen = null;
+  if (preferredBook) {
+    chosen = offers.find(o => o.book === preferredBook) || null;
+    if (!chosen) return null; // book doesn't offer this outcome
+  } else {
+    chosen = offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
+  }
   return {
     fairProb,
-    bestOdds: best.price,
-    bestBook: best.book,
+    bestOdds: chosen.price,
+    bestBook: chosen.book,
     bookCount: offers.length,
-    point: best.point ?? point ?? null,
+    point: chosen.point ?? point ?? null,
   };
 };
 
@@ -313,7 +321,7 @@ const findValueBets = (games, liveScores) => {
       if (a.isLive !== b.isLive) return a.isLive ? 1 : -1;
       return parseFloat(b.ev) - parseFloat(a.ev);
     })
-    .slice(0, 50);
+    .slice(0, 150);
 };
 
 // Generate 3-leg parlays from undervalued bets across different sports
@@ -504,7 +512,7 @@ const findSharpPlays = (games, liveScores) => {
     });
   });
 
-  return plays.sort((a, b) => b.totalScore - a.totalScore).slice(0, 50);
+  return plays.sort((a, b) => b.totalScore - a.totalScore).slice(0, 150);
 };
 
 // ── Stale Line Detector ─────────────────────────────────
@@ -570,7 +578,7 @@ const findStaleLines = (games, liveScores) => {
   return stale
     .filter(s => s.isBetterOdds) // only show stale lines that benefit the bettor
     .sort((a, b) => b.staleScore - a.staleScore)
-    .slice(0, 30);
+    .slice(0, 100);
 };
 
 // ── Reverse Line Movement Detector ──────────────────────
@@ -635,7 +643,7 @@ const findRLMPlays = (games, liveScores) => {
       });
     });
   });
-  return plays.sort((a, b) => b.rlmScore - a.rlmScore).slice(0, 20);
+  return plays.sort((a, b) => b.rlmScore - a.rlmScore).slice(0, 80);
 };
 
 // ── Correlated Parlays ──────────────────────────────────
@@ -747,7 +755,7 @@ const findCorrelatedParlays = (games, liveScores) => {
   return correlated.sort((a, b) => {
     const s = { strong: 3, moderate: 2, weak: 1 };
     return (s[b.strength] || 0) - (s[a.strength] || 0);
-  }).slice(0, 30);
+  }).slice(0, 100);
 };
 
 // ── Narrative Regression ────────────────────────────────
@@ -800,15 +808,31 @@ const findNarrativePlays = (games, liveScores) => {
     const homeNorm = game.home_team.toLowerCase();
     const awayNorm = game.away_team.toLowerCase();
 
+    // Token-based team matching — "Chicago Bulls" must not match "Chicago
+    // Fire" just because both contain "chicago". Require the mascot token
+    // (last word of the shorter name) to appear as a whole word.
+    const nameMatches = (candidate, known) => {
+      if (!candidate || !known) return false;
+      if (candidate === known) return true;
+      const tokens = (name) => name.split(/\s+/).filter(Boolean);
+      const cTok = tokens(candidate);
+      const kTok = tokens(known);
+      const short = cTok.length < kTok.length ? cTok : kTok;
+      const long = cTok.length < kTok.length ? kTok : cTok;
+      // Mascot (last token) must match; that's the most distinctive part.
+      if (short[short.length - 1] !== long[long.length - 1]) return false;
+      // All tokens in the shorter name must appear in the longer.
+      return short.every(t => long.includes(t));
+    };
     let blowoutTeam = null;
     let blowoutInfo = null;
     for (const [teamName, info] of Object.entries(blowoutDetails)) {
-      if (homeNorm.includes(teamName) || teamName.includes(homeNorm)) {
+      if (nameMatches(homeNorm, teamName)) {
         blowoutTeam = game.home_team;
         blowoutInfo = info;
         break;
       }
-      if (awayNorm.includes(teamName) || teamName.includes(awayNorm)) {
+      if (nameMatches(awayNorm, teamName)) {
         blowoutTeam = game.away_team;
         blowoutInfo = info;
         break;
@@ -1407,6 +1431,7 @@ export default function App() {
   const [analyzerLegs, setAnalyzerLegs] = useState([]);
   const [analyzerSearch, setAnalyzerSearch] = useState("");
   const [analyzerSport, setAnalyzerSport] = useState("all");
+  const [analyzerBook, setAnalyzerBook] = useState("any");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1478,7 +1503,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const CACHE_KEY = "oddsy_odds_cache";
+    const CACHE_KEY = "oddsy_odds_cache:v2";
     const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
     const fetchOdds = async () => {
@@ -1931,7 +1956,7 @@ export default function App() {
               We couldn't reach the odds provider. This can happen during off-hours or if no games are currently scheduled.
             </div>
             <button
-              onClick={() => { localStorage.removeItem("oddsy_odds_cache"); setRefreshKey(k => k + 1); }}
+              onClick={() => { localStorage.removeItem("oddsy_odds_cache:v2"); localStorage.removeItem("oddsy_odds_cache"); setRefreshKey(k => k + 1); }}
               style={{
                 padding: "8px 20px",
                 borderRadius: 8,
@@ -2994,9 +3019,46 @@ export default function App() {
             return status !== "final" && status !== "blowout" && status !== "in_progress" && status !== "live_unknown";
           });
           const sportOptions = [...new Set(upcoming.map(g => g.sport_key))];
+          const bookOptions = [...new Set(
+            upcoming.flatMap(g => (g.bookmakers || []).map(b => b.title))
+          )].sort();
           const analysis = analyzeParlay(analyzerLegs);
+          // Compute the combined odds at every book that offers all legs,
+          // so we can recommend a better book if one exists.
+          const bookCompare = (() => {
+            if (analyzerLegs.length < 2) return null;
+            const legBookPrices = analyzerLegs.map(leg => {
+              const game = games.find(g => g.id === leg.gameId);
+              if (!game) return null;
+              const { perOutcomeOffers } = collectMarketFairProbs(game, leg.marketType);
+              const pointStr = leg.point === null || leg.point === undefined ? "" : `${leg.point}`;
+              const offers = perOutcomeOffers[`${leg.outcome}_${pointStr}`] || perOutcomeOffers[`${leg.outcome}_`] || [];
+              const byBook = {};
+              offers.forEach(o => { byBook[o.book] = o.price; });
+              return byBook;
+            });
+            if (legBookPrices.some(m => !m)) return null;
+            const commonBooks = legBookPrices.reduce((acc, m) => {
+              const set = new Set(Object.keys(m));
+              return acc === null ? set : new Set([...acc].filter(b => set.has(b)));
+            }, null);
+            if (!commonBooks || commonBooks.size === 0) return null;
+            const rows = [];
+            commonBooks.forEach(book => {
+              let dec = 1;
+              for (const m of legBookPrices) {
+                const p = m[book];
+                dec *= p > 0 ? p / 100 + 1 : 100 / Math.abs(p) + 1;
+              }
+              const amer = dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+              rows.push({ book, decimal: dec, american: amer });
+            });
+            rows.sort((a, b) => b.decimal - a.decimal);
+            return rows;
+          })();
           const addLeg = (game, marketType, outcomeName, point) => {
-            const info = analyzeLeg(game, marketType, outcomeName, point);
+            const preferred = analyzerBook === "any" ? null : analyzerBook;
+            const info = analyzeLeg(game, marketType, outcomeName, point, preferred);
             if (!info) return;
             const legId = `${game.id}|${marketType}|${outcomeName}|${info.point ?? ""}`;
             if (analyzerLegs.some(l => l.id === legId)) return;
@@ -3070,6 +3132,28 @@ export default function App() {
                     })}
                   </div>
                 )}
+                {bookOptions.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 6 }}>
+                      Pricing book {analyzerBook === "any" && <span style={{ color: "#8b919a", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>(best across books — pick one to match your actual sportsbook)</span>}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {["any", ...bookOptions].map(bk => {
+                        const active = analyzerBook === bk;
+                        return (
+                          <button key={bk} onClick={() => setAnalyzerBook(bk)} style={{
+                            padding: "5px 10px", borderRadius: 999,
+                            border: active ? "1px solid #7c3aed" : "1px solid #e2e5ea",
+                            background: active ? "#7c3aed" : "#fff",
+                            color: active ? "#fff" : "#1a1d23",
+                            fontSize: 11, fontWeight: 700, cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}>{bk === "any" ? "Best line" : bk}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {upcoming.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#8b919a" }}>No upcoming games available.</div>
                 ) : (() => {
@@ -3103,27 +3187,34 @@ export default function App() {
                                   const { perOutcomeOffers } = collectMarketFairProbs(game, mt);
                                   Object.entries(perOutcomeOffers).forEach(([, offers]) => {
                                     if (!offers || offers.length === 0) return;
-                                    const best = offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
-                                    const pointStr = best.point !== null && best.point !== undefined
-                                      ? (best.point > 0 ? ` +${best.point}` : ` ${best.point}`) : "";
+                                    // When a book is pinned, use that book's price. Otherwise best.
+                                    const chosen = analyzerBook !== "any"
+                                      ? offers.find(o => o.book === analyzerBook)
+                                      : offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
+                                    if (!chosen) return; // this book doesn't offer this outcome
+                                    const pointStr = chosen.point !== null && chosen.point !== undefined
+                                      ? (chosen.point > 0 ? ` +${chosen.point}` : ` ${chosen.point}`) : "";
                                     const label = mt === "h2h" ? "ML" : mt === "spreads" ? "SPR" : "TOT";
                                     buttons.push(
-                                      <button key={`${mt}-${best.name}-${best.point ?? ""}`}
-                                        onClick={() => addLeg(game, mt, best.name, best.point)}
+                                      <button key={`${mt}-${chosen.name}-${chosen.point ?? ""}`}
+                                        onClick={() => addLeg(game, mt, chosen.name, chosen.point)}
                                         style={{
                                           padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e5ea",
                                           background: "#fff", fontSize: 11, cursor: "pointer",
                                           fontFamily: "'DM Sans', sans-serif", color: "#1a1d23",
                                         }}>
                                         <span style={{ color: "#7c3aed", fontWeight: 700 }}>{label}</span>{" "}
-                                        {best.name}{pointStr}{" "}
+                                        {chosen.name}{pointStr}{" "}
                                         <span style={{ fontFamily: "'Space Mono', monospace", color: "#0d9f4f", fontWeight: 700 }}>
-                                          {formatOdds(best.price)}
+                                          {formatOdds(chosen.price)}
                                         </span>
                                       </button>
                                     );
                                   });
                                 });
+                                if (buttons.length === 0 && analyzerBook !== "any") {
+                                  return <span style={{ fontSize: 10, color: "#8b919a" }}>{analyzerBook} doesn't post odds for this game</span>;
+                                }
                                 return buttons;
                               })()}
                             </div>
@@ -3231,6 +3322,48 @@ export default function App() {
                       ⚠ Same-game legs detected. The EV estimate assumes independence; correlated legs inflate the true fair price — real EV is likely lower. Use the Same-Game tab for correlated plays.
                     </div>
                   )}
+                  {bookCompare && bookCompare.length > 0 && (() => {
+                    const best = bookCompare[0];
+                    const currentBook = analyzerBook !== "any" ? analyzerBook : null;
+                    const current = currentBook ? bookCompare.find(r => r.book === currentBook) : null;
+                    const improvement = current ? (best.decimal / current.decimal - 1) * 100 : null;
+                    // Only recommend when another book is meaningfully better
+                    // (≥1.5% payout bump) than the user's pinned book.
+                    const showRec = current && best.book !== currentBook && improvement >= 1.5;
+                    if (showRec) {
+                      return (
+                        <div style={{
+                          background: "#064e3b", border: "1px solid #10b981",
+                          borderRadius: 8, padding: "10px 14px", marginBottom: 14, lineHeight: 1.5,
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: "#6ee7b7", marginBottom: 4 }}>
+                            💰 Shop this parlay: <span style={{ color: "#fff" }}>{best.book}</span> pays <span style={{ fontFamily: "'Space Mono', monospace" }}>{formatOdds(best.american)}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#a7f3d0" }}>
+                            {currentBook} pays {formatOdds(current.american)} on the same legs. Switching books boosts payout by {improvement.toFixed(1)}% (pays {(best.decimal - 1).toFixed(2)}x vs {(current.decimal - 1).toFixed(2)}x on a $1 stake).
+                          </div>
+                        </div>
+                      );
+                    }
+                    // On "Best line" mode, still surface the top book so the
+                    // user knows where to actually place the parlay.
+                    if (!currentBook && bookCompare.length > 0) {
+                      return (
+                        <div style={{
+                          background: "#1e3a8a", border: "1px solid #60a5fa",
+                          borderRadius: 8, padding: "10px 14px", marginBottom: 14, lineHeight: 1.5,
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: "#bfdbfe", marginBottom: 4 }}>
+                            🏦 Best book for this parlay: <span style={{ color: "#fff" }}>{best.book}</span> at <span style={{ fontFamily: "'Space Mono', monospace" }}>{formatOdds(best.american)}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#dbeafe" }}>
+                            Compared across {bookCompare.length} book{bookCompare.length === 1 ? "" : "s"} that offer all {analyzerLegs.length} legs. Pin a book above to see that book's exact price.
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <div>
                       <div style={{ fontSize: 10, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Combined odds</div>

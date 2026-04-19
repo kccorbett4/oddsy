@@ -89,7 +89,7 @@ const DEFAULT_STRATEGY = () => ({
   side: "any",
   location: "any",
   maxPicksPerDay: 100,  // slider 1–100 (100 displays "unlimited")
-  hoursWindow: 168,     // slider 2–168
+  hoursWindow: 336,     // slider 2–336 (14 days)
   books: [],
   totalMin: 0,          // slider 0–300
   totalMax: 300,
@@ -138,7 +138,10 @@ const median = (arr) => {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 };
 
-export const gameCtxKey = (game) => `${game.sport_key}:${game.away_team}@${game.home_team}`;
+export const gameCtxKey = (game) => {
+  const d = game.commence_time ? new Date(game.commence_time).toISOString().slice(0, 10) : "";
+  return `${game.sport_key}:${game.away_team}@${game.home_team}:${d}`;
+};
 
 // Migrate pre-tri-state strategies (where each filter was a one-way exclude)
 // to the new {mode, threshold} shape. Safe to call on new-shape strategies too.
@@ -493,7 +496,7 @@ export default function StrategyBuilder() {
 
   // Fetch live odds (same cache key as main app — no duplicate request)
   useEffect(() => {
-    const CACHE_KEY = "oddsy_odds_cache";
+    const CACHE_KEY = "oddsy_odds_cache:v2";
     const CACHE_DURATION = 10 * 60 * 1000;
     try {
       const cached = localStorage.getItem(CACHE_KEY);
@@ -799,8 +802,8 @@ export default function StrategyBuilder() {
                 onChange={e => updateForm({ maxPicksPerDay: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Max hours until tip: ${form.hoursWindow}h`} info="How far in advance to look. 48h = only games in the next 2 days. Shorter = fresher lines, fewer picks.">
-              <input type="range" min="2" max="168" step="2"
+            <Section title={`Max hours until tip: ${form.hoursWindow >= 336 ? "any (14d+)" : `${form.hoursWindow}h`}`} info="How far in advance to look. 48h = only games in the next 2 days. Drag right for a full 2-week window.">
+              <input type="range" min="2" max="336" step="2"
                 value={form.hoursWindow}
                 onChange={e => updateForm({ hoursWindow: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />

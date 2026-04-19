@@ -2,7 +2,10 @@
 // team records, injuries, and FPI/BPI ratings for upcoming games across
 // all supported sports. Cached in Redis for 30 min to keep API load sane.
 //
-// Response: { games: { "<sport_key>:<away>@<home>": { ...ctx } }, updatedAt }
+// Response: { games: { "<sport_key>:<away>@<home>:<YYYY-MM-DD>": { ...ctx } }, updatedAt }
+// Date suffix prevents same-day doubleheaders and multi-day series from
+// colliding (MLB teams play the same opponent on consecutive days, and the
+// old key format silently overwrote Game 1's context with Game 2's).
 // The StrategyBuilder merges this map into the /api/odds feed using the
 // same sport+team keys.
 import { createClient } from "redis";
@@ -136,7 +139,7 @@ export default async function handler(req, res) {
 
     // Scoreboards: past 10 days (rest days) + next 8 days (upcoming games)
     const pastDates = Array.from({ length: 10 }, (_, i) => ymd(new Date(now.getTime() - (i + 1) * 86400000)));
-    const futureDates = Array.from({ length: 8 }, (_, i) => ymd(new Date(now.getTime() + i * 86400000)));
+    const futureDates = Array.from({ length: 14 }, (_, i) => ymd(new Date(now.getTime() + i * 86400000)));
 
     const histTasks = [];
     const futTasks = [];
@@ -199,7 +202,8 @@ export default async function handler(req, res) {
         const awayName = away.team.displayName;
         const commenceMs = new Date(e.date).getTime();
 
-        const gameKey = `${sportKey}:${awayName}@${homeName}`;
+        const dateStr = e.date ? new Date(e.date).toISOString().slice(0, 10) : "";
+        const gameKey = `${sportKey}:${awayName}@${homeName}:${dateStr}`;
         const homeLastMs = lastGame[`${sportKey}:${homeName}`];
         const awayLastMs = lastGame[`${sportKey}:${awayName}`];
 

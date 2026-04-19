@@ -19,7 +19,10 @@ const median = (a) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-const ctxKey = (g) => `${g.sport_key}:${g.away_team}@${g.home_team}`;
+const ctxKey = (g) => {
+  const d = g.commence_time ? new Date(g.commence_time).toISOString().slice(0, 10) : "";
+  return `${g.sport_key}:${g.away_team}@${g.home_team}:${d}`;
+};
 
 // Mirror of normalizeGameCtxFilters in StrategyBuilder.jsx — migrates older
 // strategies that stored one-way exclude flags into the new tri-state mode shape.

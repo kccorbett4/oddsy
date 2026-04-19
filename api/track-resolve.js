@@ -134,9 +134,15 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Try to match the game to a final score
+      // Try to match the game to a final score. Require sport_key to match
+      // too — some team names collide across sports (Panthers exist in both
+      // NFL and NHL; Cardinals in both NFL and MLB), and without the sport
+      // check a pick could resolve against the wrong league's final.
       const matchedScore = allScores.find(
-        (s) => teamsMatch(s.home.name, pick.homeTeam) && teamsMatch(s.away.name, pick.awayTeam)
+        (s) =>
+          (!pick.sportKey || !s.sport_key || s.sport_key === pick.sportKey) &&
+          teamsMatch(s.home.name, pick.homeTeam) &&
+          teamsMatch(s.away.name, pick.awayTeam)
       );
 
       if (!matchedScore) {
