@@ -71,6 +71,7 @@ function summarizeGame(game) {
   const perBookHome = [];
   const perBookAway = [];
   const perBookDraw = [];
+  const allBooks = [];
   let hasDraw = false;
 
   for (const bm of (game.bookmakers || [])) {
@@ -94,6 +95,15 @@ function summarizeGame(game) {
       perBookAway.push(pA / total);
       if (pD > 0) perBookDraw.push(pD / total);
     }
+    allBooks.push({
+      book: bm.title,
+      homeDecimal: +hOdds.toFixed(3),
+      awayDecimal: +aOdds.toFixed(3),
+      homeAmerican: decimalToAmerican(hOdds),
+      awayAmerican: decimalToAmerican(aOdds),
+      homeDevigProb: total > 0 ? +(pH / total).toFixed(4) : null,
+      awayDevigProb: total > 0 ? +(pA / total).toFixed(4) : null,
+    });
   }
   if (!bestHome || !bestAway || perBookHome.length === 0) return null;
 
@@ -113,6 +123,7 @@ function summarizeGame(game) {
     devigAwayProb: median(perBookAway),
     devigDrawProb: hasDraw ? median(perBookDraw) : 0,
     hasDraw,
+    allBooks: allBooks.sort((a, b) => b.homeDecimal - a.homeDecimal),
   };
 }
 
@@ -158,7 +169,7 @@ function kalshiMatchesBookTeam(kalshiName, bookTeam) {
 
 // ──────────────────── match & score ────────────────────
 
-function buildComparison({ source, marketId, marketUrl, title, sportLabel, sportKey, game, yesIsHome, predProb, predBid, predAsk }) {
+function buildComparison({ source, marketId, marketUrl, title, sportLabel, sportKey, game, yesIsHome, predProb, predBid, predAsk, predYesAsk, predNoAsk }) {
   if (predProb == null || !Number.isFinite(predProb) || predProb <= 0 || predProb >= 1) return null;
 
   // For 3-way markets (soccer/MLS), Kalshi YES = P(one team wins) and NO =
@@ -174,20 +185,71 @@ function buildComparison({ source, marketId, marketUrl, title, sportLabel, sport
 
   const homeDec = game.bestHome.decimal;
   const awayDec = game.bestAway.decimal;
-  const evHome = predHome * (homeDec - 1) - (1 - predHome);
-  const evAway = predAway * (awayDec - 1) - (1 - predAway);
 
-  // Prefer the side with the larger positive EV. If both negative, the
-  // value is on the prediction market side (book is overcharging on both
-  // sides vs. the vig-free market), but we still flag the better sportsbook
-  // bet for transparency even if EV is negative.
-  const homeIsBest = evHome >= evAway;
-  const bestSide = homeIsBest ? "home" : "away";
-  const bestTeam = homeIsBest ? game.home : game.away;
-  const bestPrice = homeIsBest ? game.bestHome : game.bestAway;
-  const bestEv = homeIsBest ? evHome : evAway;
-  const bestDevig = homeIsBest ? game.devigHomeProb : game.devigAwayProb;
-  const bestPred = homeIsBest ? predHome : predAway;
+  // Four candidate bets and their EVs, each under a different "truth" assumption:
+  //   1. Book on HOME at bestHome price, trusting Kalshi as truth → uses predHome.
+  //   2. Book on AWAY at bestAway price, trusting Kalshi as truth → uses predAway.
+  //   3. Kalshi YES at yesAsk, trusting book devig as truth → uses devig YES-side.
+  //   4. Kalshi NO at noAsk, trusting book devig as truth → uses devig NO-side.
+  // The intuition: whichever market is pricing a side further from the other,
+  // the *other market* is where the mispricing sits and the bet should go.
+  const candidates = [
+    {
+      venue: "book",
+      side: "home",
+      team: game.home,
+      book: game.bestHome.book,
+      decimalOdds: homeDec,
+      truthProb: predHome,
+      ev: predHome * (homeDec - 1) - (1 - predHome),
+      pricedProb: game.devigHomeProb,
+    },
+    {
+      venue: "book",
+      side: "away",
+      team: game.away,
+      book: game.bestAway.book,
+      decimalOdds: awayDec,
+      truthProb: predAway,
+      ev: predAway * (awayDec - 1) - (1 - predAway),
+      pricedProb: game.devigAwayProb,
+    },
+  ];
+
+  // Kalshi/Polymarket "buy a share" EV: pay `ask` per share, receive 1 if the
+  // side wins. Effective decimal odds = 1/ask. Truth = the book consensus.
+  const yesSideTruth = yesIsHome ? game.devigHomeProb : game.devigAwayProb;
+  const noSideTruth = yesIsHome ? game.devigAwayProb : game.devigHomeProb;
+  if (predYesAsk && predYesAsk > 0 && predYesAsk < 1) {
+    const dec = 1 / predYesAsk;
+    candidates.push({
+      venue: source,
+      side: yesIsHome ? "home" : "away",
+      team: yesIsHome ? game.home : game.away,
+      book: source === "kalshi" ? "Kalshi" : "Polymarket",
+      decimalOdds: dec,
+      truthProb: yesSideTruth,
+      ev: yesSideTruth * (dec - 1) - (1 - yesSideTruth),
+      pricedProb: predYesAsk,
+      shareType: "YES",
+    });
+  }
+  if (predNoAsk && predNoAsk > 0 && predNoAsk < 1) {
+    const dec = 1 / predNoAsk;
+    candidates.push({
+      venue: source,
+      side: yesIsHome ? "away" : "home",
+      team: yesIsHome ? game.away : game.home,
+      book: source === "kalshi" ? "Kalshi" : "Polymarket",
+      decimalOdds: dec,
+      truthProb: noSideTruth,
+      ev: noSideTruth * (dec - 1) - (1 - noSideTruth),
+      pricedProb: predNoAsk,
+      shareType: "NO",
+    });
+  }
+
+  const winner = candidates.slice().sort((a, b) => b.ev - a.ev)[0];
 
   return {
     source,
@@ -203,6 +265,7 @@ function buildComparison({ source, marketId, marketUrl, title, sportLabel, sport
       homeProb: +predHome.toFixed(4),
       awayProb: +predAway.toFixed(4),
       bid: predBid, ask: predAsk,
+      yesAsk: predYesAsk, noAsk: predNoAsk,
     },
     book: {
       home: {
@@ -219,17 +282,20 @@ function buildComparison({ source, marketId, marketUrl, title, sportLabel, sport
         rawImpliedProb: +(1 / awayDec).toFixed(4),
         devigProb: +game.devigAwayProb.toFixed(4),
       },
+      allBooks: game.allBooks || [],
     },
     bestBet: {
-      side: bestSide,
-      team: bestTeam,
-      book: bestPrice.book,
-      americanOdds: decimalToAmerican(bestPrice.decimal),
-      decimalOdds: +bestPrice.decimal.toFixed(3),
-      predProb: +bestPred.toFixed(4),
-      devigProb: +bestDevig.toFixed(4),
-      edgePP: +((bestPred - bestDevig) * 100).toFixed(2),
-      evPercent: +(bestEv * 100).toFixed(2),
+      venue: winner.venue,
+      side: winner.side,
+      team: winner.team,
+      book: winner.book,
+      shareType: winner.shareType || null,
+      americanOdds: decimalToAmerican(winner.decimalOdds),
+      decimalOdds: +winner.decimalOdds.toFixed(3),
+      predProb: +winner.truthProb.toFixed(4),
+      devigProb: +winner.pricedProb.toFixed(4),
+      edgePP: +((winner.truthProb - winner.pricedProb) * 100).toFixed(2),
+      evPercent: +(winner.ev * 100).toFixed(2),
     },
   };
 }
@@ -273,9 +339,16 @@ export default async function handler(req, res) {
       }))),
     ]);
 
+    // Only consider games that haven't started yet. A game in progress can
+    // have wildly divergent lines across books (some freeze, some push live
+    // lines through the pregame market, some take it down entirely) — mixing
+    // those produces fake "edges" like a stale -118 next to a live +3300.
+    const nowMs = Date.now();
     const allBookGames = [];
     for (const { games } of bookGamesBySport) {
       for (const g of games) {
+        const startMs = g.commence_time ? new Date(g.commence_time).getTime() : null;
+        if (startMs != null && startMs < nowMs) continue;
         const s = summarizeGame(g);
         if (s) allBookGames.push(s);
       }
@@ -321,6 +394,7 @@ export default async function handler(req, res) {
         const yesIsHome = kalshiMatchesBookTeam(yesTeam, game.home);
         const bid = parseFloat(m.yes_bid_dollars || "0") || null;
         const ask = parseFloat(m.yes_ask_dollars || "0") || null;
+        const noAsk = parseFloat(m.no_ask_dollars || "0") || null;
         const last = parseFloat(m.last_price_dollars || "0") || null;
         const predProb = bid && ask ? (bid + ask) / 2 : last;
 
@@ -336,6 +410,8 @@ export default async function handler(req, res) {
           predProb,
           predBid: bid,
           predAsk: ask,
+          predYesAsk: ask,
+          predNoAsk: noAsk,
         });
         if (comp) matches.push(comp);
         if (evTicker) seenKalshiEvents.add(evTicker);
@@ -392,6 +468,10 @@ export default async function handler(req, res) {
       const last = Number(poly.lastTradePrice) || null;
       const predProb = bid && ask ? (bid + ask) / 2 : last;
 
+      // Polymarket publishes YES ask (bestAsk) directly; NO ask = 1 - bestBid,
+      // since a NO share pays $1 if YES loses and buyers pay (1-bid_yes) for it.
+      const noAskEstimate = bid != null ? Math.max(0, Math.min(1, 1 - bid)) : null;
+
       const comp = buildComparison({
         source: "polymarket",
         marketId: poly.id || poly.slug,
@@ -404,6 +484,8 @@ export default async function handler(req, res) {
         predProb,
         predBid: bid,
         predAsk: ask,
+        predYesAsk: ask,
+        predNoAsk: noAskEstimate,
       });
       if (comp) matches.push(comp);
     }

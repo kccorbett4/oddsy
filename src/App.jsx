@@ -314,59 +314,74 @@ const findValueBets = (games, liveScores) => {
     .slice(0, 150);
 };
 
-// Generate 3-leg parlays from undervalued bets across different sports
+// Generate 3-leg parlays from undervalued bets. Every leg in a parlay must
+// come from the SAME book — books won't settle a parlay whose legs are
+// priced at a different book, so mixing books produces parlays the user
+// literally can't place. We group valueBets by book first, then run each
+// strategy within that book's pool.
 const generateParlays = (valueBets) => {
   if (valueBets.length < 3) return [];
 
-  const bySport = {};
-  valueBets.forEach(bet => {
-    const key = bet.game.sport_key;
-    if (!bySport[key]) bySport[key] = [];
-    bySport[key].push(bet);
-  });
+  const byBook = {};
+  for (const bet of valueBets) {
+    if (!bet.book) continue;
+    (byBook[bet.book] = byBook[bet.book] || []).push(bet);
+  }
 
-  const sportKeys = Object.keys(bySport);
-  const parlays = [];
+  const parlaysForBook = (book, pool) => {
+    if (pool.length < 3) return [];
+    const bySport = {};
+    pool.forEach(bet => {
+      const key = bet.game.sport_key;
+      (bySport[key] = bySport[key] || []).push(bet);
+    });
+    const sportKeys = Object.keys(bySport);
+    const out = [];
 
-  // Strategy 1: Cross-Sport Value — best from 3 different sports
-  if (sportKeys.length >= 3) {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const shuffled = [...sportKeys].sort(() => Math.random() - 0.5);
-      const legs = shuffled.slice(0, 3).map(sk => {
-        const pool = bySport[sk];
-        return pool[Math.floor(Math.random() * Math.min(pool.length, 3))];
-      });
-      if (legs.every(Boolean) && new Set(legs.map(l => l.game.id)).size === 3) {
-        parlays.push({ legs, strategy: "Cross-Sport Value", icon: "🌐", desc: "Top +EV picks across 3 different sports for maximum diversification" });
+    // Strategy 1: Cross-Sport Value — best from 3 different sports (same book)
+    if (sportKeys.length >= 3) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const shuffled = [...sportKeys].sort(() => Math.random() - 0.5);
+        const legs = shuffled.slice(0, 3).map(sk => {
+          const p = bySport[sk];
+          return p[Math.floor(Math.random() * Math.min(p.length, 3))];
+        });
+        if (legs.every(Boolean) && new Set(legs.map(l => l.game.id)).size === 3) {
+          out.push({ legs, strategy: "Cross-Sport Value", icon: "🌐", desc: `Top +EV picks across 3 different sports, all at ${book}` });
+        }
       }
     }
-  }
 
-  // Strategy 2: Chalk Crusher — 3 underdog value plays
-  const underdogs = valueBets.filter(b => b.odds > 100).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
-  if (underdogs.length >= 3) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const pool = [...underdogs].sort(() => Math.random() - 0.5);
-      const legs = []; const usedGames = new Set();
-      for (const bet of pool) { if (!usedGames.has(bet.game.id) && legs.length < 3) { legs.push(bet); usedGames.add(bet.game.id); } }
-      if (legs.length === 3) parlays.push({ legs, strategy: "Chalk Crusher", icon: "💥", desc: "3 undervalued underdogs with positive expected value — high risk, high reward" });
+    // Strategy 2: Chalk Crusher — 3 underdog value plays (same book)
+    const underdogs = pool.filter(b => b.odds > 100).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
+    if (underdogs.length >= 3) {
+      const legs = []; const used = new Set();
+      for (const bet of underdogs) { if (!used.has(bet.game.id) && legs.length < 3) { legs.push(bet); used.add(bet.game.id); } }
+      if (legs.length === 3) out.push({ legs, strategy: "Chalk Crusher", icon: "💥", desc: `3 undervalued underdogs with positive EV at ${book}` });
     }
-  }
 
-  // Strategy 3: Sharp Consensus — highest EV bets
-  const topEV = [...valueBets].sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
-  const sharpLegs = []; const usedG1 = new Set();
-  for (const bet of topEV) { if (!usedG1.has(bet.game.id) && sharpLegs.length < 3) { sharpLegs.push(bet); usedG1.add(bet.game.id); } }
-  if (sharpLegs.length === 3) parlays.push({ legs: sharpLegs, strategy: "Sharp Consensus", icon: "🎯", desc: "The 3 highest expected value bets on the board — what the sharps are eyeing" });
+    // Strategy 3: Sharp Consensus — highest EV (same book)
+    const topEV = [...pool].sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
+    const sharpLegs = []; const usedG1 = new Set();
+    for (const bet of topEV) { if (!usedG1.has(bet.game.id) && sharpLegs.length < 3) { sharpLegs.push(bet); usedG1.add(bet.game.id); } }
+    if (sharpLegs.length === 3) out.push({ legs: sharpLegs, strategy: "Sharp Consensus", icon: "🎯", desc: `The 3 highest EV bets at ${book}` });
 
-  // Strategy 4: Safe + Sprinkle — 2 favorites + 1 big underdog
-  const favorites = valueBets.filter(b => b.odds < 0 && b.odds > -200).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
-  const bigDogs = valueBets.filter(b => b.odds > 150).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
-  if (favorites.length >= 2 && bigDogs.length >= 1) {
-    const usedG2 = new Set(); const legs = [];
-    for (const f of favorites) { if (!usedG2.has(f.game.id) && legs.length < 2) { legs.push(f); usedG2.add(f.game.id); } }
-    for (const d of bigDogs) { if (!usedG2.has(d.game.id) && legs.length < 3) { legs.push(d); usedG2.add(d.game.id); } }
-    if (legs.length === 3) parlays.push({ legs, strategy: "Safe + Sprinkle", icon: "🛡️", desc: "2 solid value favorites anchoring 1 high-upside underdog — balanced risk" });
+    // Strategy 4: Safe + Sprinkle — 2 favorites + 1 big underdog (same book)
+    const favorites = pool.filter(b => b.odds < 0 && b.odds > -200).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
+    const bigDogs = pool.filter(b => b.odds > 150).sort((a, b) => parseFloat(b.ev) - parseFloat(a.ev));
+    if (favorites.length >= 2 && bigDogs.length >= 1) {
+      const used = new Set(); const legs = [];
+      for (const f of favorites) { if (!used.has(f.game.id) && legs.length < 2) { legs.push(f); used.add(f.game.id); } }
+      for (const d of bigDogs) { if (!used.has(d.game.id) && legs.length < 3) { legs.push(d); used.add(d.game.id); } }
+      if (legs.length === 3) out.push({ legs, strategy: "Safe + Sprinkle", icon: "🛡️", desc: `2 value favorites + 1 high-upside underdog at ${book}` });
+    }
+
+    return out.map(p => ({ ...p, book }));
+  };
+
+  const parlays = [];
+  for (const [book, pool] of Object.entries(byBook)) {
+    parlays.push(...parlaysForBook(book, pool));
   }
 
   // Calculate combined odds for each parlay

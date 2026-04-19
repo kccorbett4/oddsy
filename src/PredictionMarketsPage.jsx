@@ -157,48 +157,60 @@ function ValueCard({ match }) {
   const sportIcon = SPORT_ICONS[sport] || "🎯";
   const ev = bestBet.evPercent;
   const isPositive = ev > 0;
+  const venueIsPredMarket = bestBet.venue === "kalshi" || bestBet.venue === "polymarket";
   const [expanded, setExpanded] = useState(false);
 
   const heroBg = isPositive
-    ? "linear-gradient(135deg, #15803d 0%, #16a34a 100%)"
+    ? (venueIsPredMarket
+        ? "linear-gradient(135deg, #7e22ce 0%, #9333ea 100%)"
+        : "linear-gradient(135deg, #15803d 0%, #16a34a 100%)")
     : "linear-gradient(135deg, #475569 0%, #64748b 100%)";
+
+  // Build the main action phrase. Book bets read "Bet Team to win"; prediction-
+  // market buys read "Buy YES/NO on Team at Kalshi".
+  const actionVerb = venueIsPredMarket ? "Buy" : "Bet";
+  const actionObject = venueIsPredMarket
+    ? `${bestBet.shareType || "YES"} on ${bestBet.team}`
+    : `${bestBet.team} to win`;
+  const venueLabel = venueIsPredMarket
+    ? `on ${bestBet.book}`
+    : `at ${bestBet.book}`;
+
+  const priceDisplay = venueIsPredMarket && bestBet.decimalOdds
+    ? `$${(1 / bestBet.decimalOdds).toFixed(2)}`
+    : formatOdds(bestBet.americanOdds);
 
   return (
     <div style={{
       background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14,
       boxShadow: "0 2px 6px rgba(0,0,0,0.04)", overflow: "hidden",
     }}>
-      {/* HERO: the one thing users need to see — what to bet and where */}
+      {/* HERO: what to bet and where */}
       <div style={{ background: heroBg, color: "#fff", padding: "16px 18px" }}>
-        <div style={{
-          fontSize: 10, fontWeight: 800, letterSpacing: 1.2,
-          textTransform: "uppercase", opacity: 0.9, marginBottom: 4,
-        }}>
-          {isPositive ? "✓ Place this bet" : "No edge — skip"}
-        </div>
         <div style={{
           fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 8,
           fontFamily: "'DM Sans', sans-serif",
         }}>
-          Bet <span style={{ textDecoration: "underline", textDecorationThickness: 2, textUnderlineOffset: 3 }}>{bestBet.team}</span> to win
+          {actionVerb} <span style={{ textDecoration: "underline", textDecorationThickness: 2, textUnderlineOffset: 3 }}>{actionObject}</span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           <div style={{
             padding: "8px 12px", background: "rgba(255,255,255,0.18)",
             borderRadius: 8, fontSize: 13, fontWeight: 800,
           }}>
-            at <span style={{ fontSize: 16 }}>{bestBet.book}</span>
+            {venueLabel.split(" ")[0]} <span style={{ fontSize: 16 }}>{bestBet.book}</span>
           </div>
           <div style={{
             padding: "8px 12px", background: "rgba(0,0,0,0.22)",
             borderRadius: 8, fontSize: 16, fontWeight: 900,
             fontFamily: "'Space Mono', monospace",
           }}>
-            {formatOdds(bestBet.americanOdds)}
+            {priceDisplay}
           </div>
           {isPositive && (
             <div style={{
-              padding: "8px 12px", background: "#fff", color: "#15803d",
+              padding: "8px 12px", background: "#fff",
+              color: venueIsPredMarket ? "#7e22ce" : "#15803d",
               borderRadius: 8, fontSize: 13, fontWeight: 900,
               fontFamily: "'Space Mono', monospace",
             }}>
@@ -223,13 +235,24 @@ function ValueCard({ match }) {
         </div>
       </div>
 
-      {/* Why we're recommending it — plain English */}
+      {/* Plain-English explanation. Two flavors: book soft vs prediction market soft. */}
       {isPositive && (
         <div style={{ padding: "12px 18px", fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
-          <b>{match.source === "kalshi" ? "Kalshi" : "Polymarket"}</b> prices {bestBet.team} to win at{" "}
-          <b style={{ color: "#15803d" }}>{formatPct(bestBet.predProb)}</b>, but <b>{bestBet.book}</b> is
-          paying out as if it's only <b style={{ color: "#b91c1c" }}>{formatPct(bestBet.devigProb)}</b>.
-          That's a <b>{bestBet.edgePP.toFixed(1)}pp</b> mispricing — the book line is soft.
+          {venueIsPredMarket ? (
+            <>
+              Sportsbook consensus prices {bestBet.team} at{" "}
+              <b style={{ color: "#7e22ce" }}>{formatPct(bestBet.predProb)}</b>, but {bestBet.book} shares
+              cost only <b style={{ color: "#b91c1c" }}>{formatPct(bestBet.devigProb)}</b>.
+              That's a <b>{bestBet.edgePP.toFixed(1)}pp</b> mispricing on the prediction market.
+            </>
+          ) : (
+            <>
+              <b>{match.source === "kalshi" ? "Kalshi" : "Polymarket"}</b> prices {bestBet.team} to win at{" "}
+              <b style={{ color: "#15803d" }}>{formatPct(bestBet.predProb)}</b>, but <b>{bestBet.book}</b> is
+              paying out as if it's only <b style={{ color: "#b91c1c" }}>{formatPct(bestBet.devigProb)}</b>.
+              That's a <b>{bestBet.edgePP.toFixed(1)}pp</b> mispricing — the book line is soft.
+            </>
+          )}
         </div>
       )}
 
@@ -242,7 +265,7 @@ function ValueCard({ match }) {
             fontFamily: "inherit",
           }}
         >
-          {expanded ? "Hide breakdown ▴" : "Show both sides ▾"}
+          {expanded ? "Hide details ▴" : "Show both sides & all books ▾"}
         </button>
 
         {expanded && (
@@ -261,6 +284,11 @@ function ValueCard({ match }) {
                 book={book.away}
               />
             </div>
+
+            {Array.isArray(book.allBooks) && book.allBooks.length > 0 && (
+              <AllBooksTable books={book.allBooks} teams={teams} bestBet={bestBet} />
+            )}
+
             <div style={{
               marginTop: 10, fontSize: 10, color: "#94a3b8",
               display: "flex", justifyContent: "flex-end",
@@ -275,6 +303,56 @@ function ValueCard({ match }) {
     </div>
   );
 }
+
+function AllBooksTable({ books, teams, bestBet }) {
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 800, color: "#64748b",
+        textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6,
+      }}>
+        Every book ({books.length})
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "#f8fafc", color: "#64748b" }}>
+              <th style={thStyle}>Book</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{teams.home}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{teams.away}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {books.map((b, i) => {
+              const isBestHome = bestBet.venue === "book" && bestBet.side === "home" && b.book === bestBet.book;
+              const isBestAway = bestBet.venue === "book" && bestBet.side === "away" && b.book === bestBet.book;
+              return (
+                <tr key={b.book + i} style={{ borderTop: "1px solid #f1f5f9" }}>
+                  <td style={tdStyle}>{b.book}</td>
+                  <td style={{
+                    ...tdStyle, textAlign: "right",
+                    fontFamily: "'Space Mono', monospace",
+                    background: isBestHome ? "#dcfce7" : "transparent",
+                    fontWeight: isBestHome ? 900 : 500,
+                  }}>{formatOdds(b.homeAmerican)}</td>
+                  <td style={{
+                    ...tdStyle, textAlign: "right",
+                    fontFamily: "'Space Mono', monospace",
+                    background: isBestAway ? "#dcfce7" : "transparent",
+                    fontWeight: isBestAway ? 900 : 500,
+                  }}>{formatOdds(b.awayAmerican)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const thStyle = { textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: 10, letterSpacing: 0.4, textTransform: "uppercase" };
+const tdStyle = { padding: "5px 8px", color: "#1e293b" };
 
 function SideColumn({ label, isBest, pred, book }) {
   const diff = pred - book.devigProb;
