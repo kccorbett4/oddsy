@@ -45,6 +45,9 @@ export default function ArbitragePage() {
   const [error, setError] = useState(null);
   const [sport, setSport] = useState("");
   const [bankroll, setBankroll] = useState(100);
+  // null = "all books enabled". Once the user unchecks something we
+  // switch to an explicit Set so further interactions stay precise.
+  const [enabledBooks, setEnabledBooks] = useState(null);
 
   const loadData = async (sportFilter = "") => {
     setLoading(true);
@@ -75,10 +78,33 @@ export default function ArbitragePage() {
     return [...s].sort();
   }, [opps]);
 
-  const sorted = useMemo(
-    () => [...opps].sort((a, b) => (b.profit_pct || 0) - (a.profit_pct || 0)),
-    [opps]
-  );
+  const bookOptions = useMemo(() => {
+    const s = new Set();
+    for (const o of opps) {
+      if (o.side_a?.bookmaker) s.add(o.side_a.bookmaker);
+      if (o.side_b?.bookmaker) s.add(o.side_b.bookmaker);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [opps]);
+
+  const sorted = useMemo(() => {
+    const filtered = enabledBooks
+      ? opps.filter(o =>
+          enabledBooks.has(o.side_a?.bookmaker) && enabledBooks.has(o.side_b?.bookmaker)
+        )
+      : opps;
+    return [...filtered].sort((a, b) => (b.profit_pct || 0) - (a.profit_pct || 0));
+  }, [opps, enabledBooks]);
+
+  const toggleBook = (book) => {
+    setEnabledBooks(prev => {
+      const base = prev ? new Set(prev) : new Set(bookOptions);
+      if (base.has(book)) base.delete(book); else base.add(book);
+      return base;
+    });
+  };
+  const selectAllBooks = () => setEnabledBooks(null);
+  const selectNoBooks = () => setEnabledBooks(new Set());
 
   const sportLabel = (k) => ({
     baseball_mlb: "MLB",
@@ -149,6 +175,43 @@ export default function ArbitragePage() {
 
       </div>
 
+      {bookOptions.length > 0 && (
+        <div style={{ marginBottom: 20, padding: 12, background: "#f7f8fa", borderRadius: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>
+              Sportsbooks
+              <span style={{ fontWeight: 400, color: "#888", marginLeft: 6 }}>
+                ({enabledBooks ? enabledBooks.size : bookOptions.length} of {bookOptions.length})
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={selectAllBooks} style={filterBtn}>Select all</button>
+              <button onClick={selectNoBooks} style={filterBtn}>Clear</button>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {bookOptions.map(book => {
+              const active = enabledBooks ? enabledBooks.has(book) : true;
+              return (
+                <button
+                  key={book}
+                  onClick={() => toggleBook(book)}
+                  style={{
+                    padding: "5px 10px", borderRadius: 999, fontSize: 12, cursor: "pointer",
+                    border: active ? "1px solid #1a73e8" : "1px solid #d5d8de",
+                    background: active ? "#e8f0fe" : "#fff",
+                    color: active ? "#1a4ea0" : "#666",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {book}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Loading opportunities…</div>}
       {error && <div style={{ padding: 16, background: "#ffe9e9", color: "#a00", borderRadius: 8 }}>Error: {error}</div>}
 
@@ -163,7 +226,9 @@ export default function ArbitragePage() {
 
       {!loading && !error && sorted.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", color: "#888" }}>
-          No arbitrage opportunities right now. Lines move constantly — check back in a minute.
+          {opps.length > 0 && enabledBooks && enabledBooks.size < bookOptions.length
+            ? <>No arbitrage opportunities between your selected sportsbooks. <button onClick={selectAllBooks} style={{ ...filterBtn, marginLeft: 6 }}>Select all books</button></>
+            : "No arbitrage opportunities right now. Lines move constantly — check back in a minute."}
           {sportOptions.length > 0 && sport === "" && <div style={{ fontSize: 12, marginTop: 8 }}>Sports queried: {(meta?.sportsQueried || []).map(sportLabel).join(", ")}</div>}
         </div>
       )}
@@ -216,6 +281,11 @@ export default function ArbitragePage() {
     </div>
   );
 }
+
+const filterBtn = {
+  padding: "4px 10px", borderRadius: 6, border: "1px solid #d5d8de",
+  background: "#fff", fontSize: 12, color: "#444", cursor: "pointer",
+};
 
 function SideCard({ side, stake }) {
   if (!side) return <div />;
