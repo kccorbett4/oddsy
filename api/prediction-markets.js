@@ -1,182 +1,386 @@
-// Aggregates Kalshi + Polymarket sports markets into a single normalized
-// feed. Both APIs are public / unauthenticated, so we proxy server-side
-// mainly for CORS, caching, and shape normalization.
+// Cross-market value detector. Kalshi/Polymarket prices are vig-free —
+// when their YES % disagrees with the sportsbook's devig implied prob for
+// the same game, one side is mispriced and there's +EV to capture.
 //
-// Normalized market shape:
-//   {
-//     source: "kalshi" | "polymarket",
-//     id, title, subtitle, sport, league, commenceTime, closeTime,
-//     yesPrice, yesBid, yesAsk, volume, openInterest, url
-//   }
-//
-// Prices are floats in [0,1] representing implied probability of YES.
+// We only surface prediction-market entries where the same matchup is
+// posted on US sportsbooks (via The Odds API h2h market), so every row
+// on the page has an apples-to-apples bet you can place somewhere.
 
 const KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2";
 const POLY_BASE = "https://gamma-api.polymarket.com";
+const ODDS_BASE = "https://api.the-odds-api.com/v4";
 
-// Game-winner series we care about. Kalshi's catalog is enormous — we
-// stick to the major US leagues for relevance. Season-aware: only fetch
-// a series if it's currently in season (saves API round-trips).
-const KALSHI_SERIES = [
-  { ticker: "KXMLBGAME", sport: "MLB", seasonMonths: [2, 3, 4, 5, 6, 7, 8, 9] },
-  { ticker: "KXNBAGAME", sport: "NBA", seasonMonths: [9, 10, 11, 0, 1, 2, 3, 4, 5] },
-  { ticker: "KXNHLGAME", sport: "NHL", seasonMonths: [9, 10, 11, 0, 1, 2, 3, 4, 5] },
-  { ticker: "KXNFLGAME", sport: "NFL", seasonMonths: [7, 8, 9, 10, 11, 0, 1] },
-  { ticker: "KXWNBAGAME", sport: "WNBA", seasonMonths: [4, 5, 6, 7, 8, 9] },
-  { ticker: "KXMLSGAME", sport: "MLS", seasonMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
-];
+const SPORT_CONFIGS = {
+  baseball_mlb:         { kalshi: "KXMLBGAME",  label: "MLB",  seasonMonths: [2,3,4,5,6,7,8,9] },
+  basketball_nba:       { kalshi: "KXNBAGAME",  label: "NBA",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
+  icehockey_nhl:        { kalshi: "KXNHLGAME",  label: "NHL",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
+  americanfootball_nfl: { kalshi: "KXNFLGAME",  label: "NFL",  seasonMonths: [7,8,9,10,11,0,1] },
+  basketball_wnba:      { kalshi: "KXWNBAGAME", label: "WNBA", seasonMonths: [4,5,6,7,8,9] },
+  soccer_usa_mls:       { kalshi: "KXMLSGAME",  label: "MLS",  seasonMonths: [1,2,3,4,5,6,7,8,9,10] },
+};
 
-async function fetchKalshiEventsWithMarkets(seriesTicker) {
-  const url = `${KALSHI_BASE}/markets?limit=200&status=open&series_ticker=${seriesTicker}`;
-  const r = await fetch(url);
-  if (!r.ok) return [];
-  const json = await r.json();
-  return json.markets || [];
+async function jget(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
-function normalizeKalshiMarket(m, sportLabel) {
-  const bid = parseFloat(m.yes_bid_dollars || "0");
-  const ask = parseFloat(m.yes_ask_dollars || "0");
-  const last = parseFloat(m.last_price_dollars || "0");
-  const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : (last || bid || ask || null);
+async function fetchKalshi(seriesTicker) {
+  const j = await jget(`${KALSHI_BASE}/markets?limit=200&status=open&series_ticker=${seriesTicker}`);
+  return j?.markets || [];
+}
+
+async function fetchPolymarket() {
+  const j = await jget(`${POLY_BASE}/markets?limit=100&closed=false&active=true&tag_id=1&order=volume&ascending=false`);
+  return Array.isArray(j) ? j : [];
+}
+
+async function fetchBookGames(sportKey, apiKey) {
+  const j = await jget(`${ODDS_BASE}/sports/${sportKey}/odds?apiKey=${apiKey}&regions=us,us2&markets=h2h&oddsFormat=decimal`);
+  return Array.isArray(j) ? j : [];
+}
+
+const decimalToAmerican = (d) => {
+  if (!Number.isFinite(d) || d <= 1) return null;
+  return d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
+};
+
+// Proportional devig for a two-way market. Per-book, then we median
+// across books to get a stable consensus that isn't skewed by any one
+// outlier's juice.
+function summarizeGame(game) {
+  const home = game.home_team, away = game.away_team;
+  if (!home || !away) return null;
+
+  let bestHome = null, bestAway = null;
+  const perBookHome = [];
+  const perBookAway = [];
+  const perBookDraw = [];
+  let hasDraw = false;
+
+  for (const bm of (game.bookmakers || [])) {
+    const mkt = (bm.markets || []).find(m => m.key === "h2h");
+    if (!mkt) continue;
+    let hOdds = null, aOdds = null, dOdds = null;
+    for (const o of (mkt.outcomes || [])) {
+      if (!Number.isFinite(o.price) || o.price <= 1) continue;
+      if (o.name === home) hOdds = o.price;
+      else if (o.name === away) aOdds = o.price;
+      else if (/^draw$/i.test(o.name || "")) dOdds = o.price;
+    }
+    if (hOdds == null || aOdds == null) continue;
+    if (!bestHome || hOdds > bestHome.decimal) bestHome = { decimal: hOdds, book: bm.title };
+    if (!bestAway || aOdds > bestAway.decimal) bestAway = { decimal: aOdds, book: bm.title };
+    const pH = 1 / hOdds, pA = 1 / aOdds, pD = dOdds ? 1 / dOdds : 0;
+    if (pD > 0) hasDraw = true;
+    const total = pH + pA + pD;
+    if (total > 0) {
+      perBookHome.push(pH / total);
+      perBookAway.push(pA / total);
+      if (pD > 0) perBookDraw.push(pD / total);
+    }
+  }
+  if (!bestHome || !bestAway || perBookHome.length === 0) return null;
+
+  const median = (arr) => {
+    if (arr.length === 0) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
+  };
+
   return {
-    source: "kalshi",
-    id: m.ticker,
-    title: m.title || "",
-    subtitle: m.yes_sub_title || "",
+    sportKey: game.sport_key,
+    home, away,
+    commenceTime: game.commence_time,
+    bestHome, bestAway,
+    devigHomeProb: median(perBookHome),
+    devigAwayProb: median(perBookAway),
+    devigDrawProb: hasDraw ? median(perBookDraw) : 0,
+    hasDraw,
+  };
+}
+
+// ──────────────────── team name matching ────────────────────
+
+function normName(s) {
+  return (s || "").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
+// Kalshi uses short names that don't line up with Odds API's full names.
+// Single-letter disambiguators ("Los Angeles A" for Angels vs "Los Angeles D"
+// for Dodgers) and informal nicknames ("A's") need an alias table.
+const KALSHI_ALIAS = {
+  "a s": "athletics", "as": "athletics",
+  "sf": "san francisco", "tb": "tampa bay",
+};
+
+function kalshiMatchesBookTeam(kalshiName, bookTeam) {
+  const k = normName(kalshiName);
+  const b = normName(bookTeam);
+  if (!k || !b) return false;
+  if (KALSHI_ALIAS[k] && b.includes(KALSHI_ALIAS[k])) return true;
+
+  // "Los Angeles A" → city = "los angeles", initial = "a"; match against
+  // book team "los angeles angels" by city + first-letter-of-nickname.
+  const m = k.match(/^(.+)\s([a-z])$/);
+  if (m) {
+    const city = m[1], initial = m[2];
+    if (b.startsWith(city + " ")) {
+      const rest = b.slice(city.length).trim();
+      return rest.length > 0 && rest[0] === initial;
+    }
+  }
+
+  if (b.includes(k)) return true;
+  const kTokens = k.split(" ").filter(t => t.length >= 3);
+  const bTokens = b.split(" ").filter(t => t.length >= 3);
+  return kTokens.some(t => bTokens.includes(t));
+}
+
+// ──────────────────── match & score ────────────────────
+
+function buildComparison({ source, marketId, marketUrl, title, sportLabel, sportKey, game, yesIsHome, predProb, predBid, predAsk }) {
+  if (predProb == null || !Number.isFinite(predProb) || predProb <= 0 || predProb >= 1) return null;
+
+  // For 3-way markets (soccer/MLS), Kalshi YES = P(one team wins) and NO =
+  // P(draw or other team wins). We map NO back to P(other team wins) by
+  // pulling the book's draw prob out — imperfect, but better than treating
+  // NO as if it were a 2-way "other team wins".
+  const predYesSide = predProb;
+  const predNoSide = game.hasDraw
+    ? Math.max(0, 1 - predYesSide - game.devigDrawProb)
+    : 1 - predYesSide;
+  const predHome = yesIsHome ? predYesSide : predNoSide;
+  const predAway = yesIsHome ? predNoSide : predYesSide;
+
+  const homeDec = game.bestHome.decimal;
+  const awayDec = game.bestAway.decimal;
+  const evHome = predHome * (homeDec - 1) - (1 - predHome);
+  const evAway = predAway * (awayDec - 1) - (1 - predAway);
+
+  // Prefer the side with the larger positive EV. If both negative, the
+  // value is on the prediction market side (book is overcharging on both
+  // sides vs. the vig-free market), but we still flag the better sportsbook
+  // bet for transparency even if EV is negative.
+  const homeIsBest = evHome >= evAway;
+  const bestSide = homeIsBest ? "home" : "away";
+  const bestTeam = homeIsBest ? game.home : game.away;
+  const bestPrice = homeIsBest ? game.bestHome : game.bestAway;
+  const bestEv = homeIsBest ? evHome : evAway;
+  const bestDevig = homeIsBest ? game.devigHomeProb : game.devigAwayProb;
+  const bestPred = homeIsBest ? predHome : predAway;
+
+  return {
+    source,
+    marketId,
+    marketUrl,
+    title,
     sport: sportLabel,
-    league: sportLabel,
-    commenceTime: m.occurrence_datetime || null,
-    closeTime: m.close_time || null,
-    yesPrice: mid,
-    yesBid: bid || null,
-    yesAsk: ask || null,
-    lastPrice: last || null,
-    volume: m.volume || null,
-    openInterest: parseFloat(m.open_interest_fp || "0") || null,
-    liquidity: parseFloat(m.liquidity_dollars || "0") || null,
-    url: `https://kalshi.com/markets/${m.ticker}`,
+    sportKey,
+    teams: { home: game.home, away: game.away },
+    commenceTime: game.commenceTime,
+    predictionMarket: {
+      yesTeam: yesIsHome ? game.home : game.away,
+      homeProb: +predHome.toFixed(4),
+      awayProb: +predAway.toFixed(4),
+      bid: predBid, ask: predAsk,
+    },
+    book: {
+      home: {
+        bestBook: game.bestHome.book,
+        decimalOdds: +homeDec.toFixed(3),
+        americanOdds: decimalToAmerican(homeDec),
+        rawImpliedProb: +(1 / homeDec).toFixed(4),
+        devigProb: +game.devigHomeProb.toFixed(4),
+      },
+      away: {
+        bestBook: game.bestAway.book,
+        decimalOdds: +awayDec.toFixed(3),
+        americanOdds: decimalToAmerican(awayDec),
+        rawImpliedProb: +(1 / awayDec).toFixed(4),
+        devigProb: +game.devigAwayProb.toFixed(4),
+      },
+    },
+    bestBet: {
+      side: bestSide,
+      team: bestTeam,
+      book: bestPrice.book,
+      americanOdds: decimalToAmerican(bestPrice.decimal),
+      decimalOdds: +bestPrice.decimal.toFixed(3),
+      predProb: +bestPred.toFixed(4),
+      devigProb: +bestDevig.toFixed(4),
+      edgePP: +((bestPred - bestDevig) * 100).toFixed(2),
+      evPercent: +(bestEv * 100).toFixed(2),
+    },
   };
 }
 
-async function fetchPolymarketSports() {
-  // tag_id=1 = "Sports" on Polymarket's Gamma API. We pull the highest-
-  // volume open markets, filter to ones closing in the next 7d, and sort.
-  const url = `${POLY_BASE}/markets?limit=100&closed=false&active=true&tag_id=1&order=volume&ascending=false`;
-  const r = await fetch(url);
-  if (!r.ok) return [];
-  const arr = await r.json();
-  return Array.isArray(arr) ? arr : [];
-}
-
-function normalizePolyMarket(m) {
-  const bid = Number(m.bestBid) || null;
-  const ask = Number(m.bestAsk) || null;
-  const last = Number(m.lastTradePrice) || null;
-  const mid = bid != null && ask != null && bid > 0 && ask > 0 ? (bid + ask) / 2 : last;
-  // Polymarket doesn't hand back a clean league tag on gamma; we sniff it
-  // from the slug or question text so the UI can group properly.
-  const text = `${m.slug || ""} ${m.question || ""}`.toLowerCase();
-  let sport = "Other";
-  if (text.startsWith("mlb-") || /\bmlb\b/.test(text)) sport = "MLB";
-  else if (text.startsWith("nba-") || /\bnba\b/.test(text)) sport = "NBA";
-  else if (text.startsWith("nfl-") || /\bnfl\b/.test(text)) sport = "NFL";
-  else if (text.startsWith("nhl-") || /\bnhl\b/.test(text)) sport = "NHL";
-  else if (text.startsWith("wnba-") || /\bwnba\b/.test(text)) sport = "WNBA";
-  else if (/\bufc\b|\bmma\b|\bfight\b|\bboxing\b/.test(text)) sport = "Fighting";
-  else if (/\btennis|\batp\b|\bwta\b/.test(text)) sport = "Tennis";
-  else if (/\bpga\b|\bgolf\b/.test(text)) sport = "Golf";
-  else if (text.startsWith("codmw-") || /\besports?\b|\bcs2\b|\bdota\b|\bleague of legends\b/.test(text)) sport = "Esports";
-  // Soccer catch-all: Polymarket's sports tag is soccer-heavy and its
-  // slugs/questions use predictable patterns ("end in a draw", "O/U X",
-  // "Spread: Team", "Will <club name> win"). Match anything that looks
-  // like a soccer matchup before falling through to "Other".
-  else if (
-    /end in a draw/.test(text)
-    || /\bspread:\s/.test(text)
-    || /\bo\/u\s+\d/.test(text)
-    || /\bboth teams to score\b/.test(text)
-    || / win on \d{4}-\d{2}-\d{2}/.test(text)
-    || /\b(fc|cf|ac|sc|afc|cfc|sv)\b/.test(text)
-    || /\bsoccer|football|\bepl\b|\bmls\b|\bla liga\b|\bserie a\b|\bchampions league\b/.test(text)
-  ) sport = "Soccer";
-
-  const slug = m.slug || "";
-  return {
-    source: "polymarket",
-    id: m.id || slug,
-    title: m.question || "",
-    subtitle: "",
-    sport,
-    league: sport,
-    commenceTime: m.startDate || null,
-    closeTime: m.endDate || null,
-    yesPrice: mid,
-    yesBid: bid,
-    yesAsk: ask,
-    lastPrice: last,
-    volume: Number(m.volume) || null,
-    openInterest: null,
-    liquidity: Number(m.liquidity) || null,
-    url: slug ? `https://polymarket.com/event/${slug}` : "https://polymarket.com",
-  };
-}
+// ──────────────────── handler ────────────────────
 
 export default async function handler(req, res) {
-  const source = (req.query?.source || "all").toString().toLowerCase();
-  const now = new Date();
-  const month = now.getMonth();
+  const API_KEY = process.env.ODDS_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "ODDS_API_KEY not configured" });
+
+  const month = new Date().getMonth();
+  const inSeasonKeys = Object.entries(SPORT_CONFIGS)
+    .filter(([, cfg]) => cfg.seasonMonths.includes(month))
+    .map(([k]) => k);
 
   try {
-    const out = { markets: [], sources: {} };
+    const [kalshiBySport, polyMarkets, bookGamesBySport] = await Promise.all([
+      Promise.all(inSeasonKeys.map(async (sportKey) => ({
+        sportKey,
+        cfg: SPORT_CONFIGS[sportKey],
+        markets: await fetchKalshi(SPORT_CONFIGS[sportKey].kalshi),
+      }))),
+      fetchPolymarket(),
+      Promise.all(inSeasonKeys.map(async (sportKey) => ({
+        sportKey,
+        games: await fetchBookGames(sportKey, API_KEY),
+      }))),
+    ]);
 
-    if (source === "all" || source === "kalshi") {
-      const inSeason = KALSHI_SERIES.filter(s => s.seasonMonths.includes(month));
-      const results = await Promise.all(
-        inSeason.map(async s => ({ s, markets: await fetchKalshiEventsWithMarkets(s.ticker) }))
-      );
-      let kalshiCount = 0;
-      // Only include Kalshi markets closing within the next 72h — beyond
-      // that the book's still figuring out liquidity and it's mostly noise.
-      const cutoff = now.getTime() + 72 * 3600 * 1000;
-      for (const { s, markets } of results) {
-        for (const m of markets) {
-          const norm = normalizeKalshiMarket(m, s.sport);
-          if (norm.yesBid == null && norm.yesAsk == null && !norm.lastPrice) continue;
-          if (norm.closeTime && new Date(norm.closeTime).getTime() > cutoff) continue;
-          out.markets.push(norm);
-          kalshiCount++;
-        }
+    const allBookGames = [];
+    for (const { games } of bookGamesBySport) {
+      for (const g of games) {
+        const s = summarizeGame(g);
+        if (s) allBookGames.push(s);
       }
-      out.sources.kalshi = { count: kalshiCount, series: inSeason.map(s => s.ticker) };
     }
 
-    if (source === "all" || source === "polymarket") {
-      const polyMarkets = await fetchPolymarketSports();
-      let polyCount = 0;
-      for (const m of polyMarkets) {
-        const norm = normalizePolyMarket(m);
-        if (norm.yesPrice == null) continue;
-        // Filter out stale markets whose end date already passed.
-        if (norm.closeTime && new Date(norm.closeTime).getTime() < now.getTime() - 3600 * 1000) continue;
-        out.markets.push(norm);
-        polyCount++;
+    const matches = [];
+
+    // Kalshi → sportsbook
+    for (const { sportKey, cfg, markets } of kalshiBySport) {
+      for (const m of markets) {
+        const yesTeam = m.yes_sub_title;
+        const noTeam = m.no_sub_title;
+        if (!yesTeam || !noTeam || yesTeam === noTeam) continue;
+        const kTime = m.occurrence_datetime ? new Date(m.occurrence_datetime).getTime() : null;
+        if (kTime == null) continue;
+
+        const game = allBookGames.find(g => {
+          if (g.sportKey !== sportKey) return false;
+          const gTime = g.commenceTime ? new Date(g.commenceTime).getTime() : null;
+          if (gTime == null || Math.abs(gTime - kTime) > 6 * 3600 * 1000) return false;
+          const yesH = kalshiMatchesBookTeam(yesTeam, g.home);
+          const yesA = kalshiMatchesBookTeam(yesTeam, g.away);
+          const noH = kalshiMatchesBookTeam(noTeam, g.home);
+          const noA = kalshiMatchesBookTeam(noTeam, g.away);
+          return (yesH && noA) || (yesA && noH);
+        });
+        if (!game) continue;
+
+        const yesIsHome = kalshiMatchesBookTeam(yesTeam, game.home);
+        const bid = parseFloat(m.yes_bid_dollars || "0") || null;
+        const ask = parseFloat(m.yes_ask_dollars || "0") || null;
+        const last = parseFloat(m.last_price_dollars || "0") || null;
+        const predProb = bid && ask ? (bid + ask) / 2 : last;
+
+        const comp = buildComparison({
+          source: "kalshi",
+          marketId: m.ticker,
+          marketUrl: `https://kalshi.com/markets/${m.ticker}`,
+          title: m.title || `${game.away} @ ${game.home}`,
+          sportLabel: cfg.label,
+          sportKey,
+          game,
+          yesIsHome,
+          predProb,
+          predBid: bid,
+          predAsk: ask,
+        });
+        if (comp) matches.push(comp);
       }
-      out.sources.polymarket = { count: polyCount };
     }
 
-    // Sort: upcoming first, then volume desc, then liquidity.
-    out.markets.sort((a, b) => {
-      const ta = a.closeTime ? new Date(a.closeTime).getTime() : Infinity;
-      const tb = b.closeTime ? new Date(b.closeTime).getTime() : Infinity;
-      if (ta !== tb) return ta - tb;
-      return (b.volume || 0) - (a.volume || 0);
+    // Polymarket → sportsbook. Much looser than Kalshi: their questions
+    // are free-form strings, so we only match clearly-phrased "will X win"
+    // or "X vs Y" markets and skip totals/spreads/draws.
+    for (const poly of polyMarkets) {
+      const q = (poly.question || "").toLowerCase();
+      const slug = (poly.slug || "").toLowerCase();
+      if (!q || !slug) continue;
+      if (/end in a draw|\bo\/u\b|\bspread\b|over\/under|both teams to score|\bto score\b|correct score/i.test(q)) continue;
+      if (!/win|beat|\bvs\b|\bv\./i.test(q) && !/-vs-|-win-/.test(slug)) continue;
+
+      const endMs = poly.endDate ? new Date(poly.endDate).getTime() : null;
+      const startMs = poly.startDate ? new Date(poly.startDate).getTime() : null;
+      const pickMs = startMs || endMs;
+      if (pickMs == null) continue;
+
+      const game = allBookGames.find(g => {
+        const gTime = g.commenceTime ? new Date(g.commenceTime).getTime() : null;
+        if (gTime == null) return false;
+        if (Math.abs(gTime - pickMs) > 12 * 3600 * 1000) return false;
+        const h = normName(g.home), a = normName(g.away);
+        const hSlug = h.replace(/\s/g, "-"), aSlug = a.replace(/\s/g, "-");
+        const qHit = (token) => {
+          if (!token) return false;
+          const words = token.split(" ").filter(w => w.length >= 4);
+          return words.some(w => q.includes(w));
+        };
+        const slugHit = slug.includes(hSlug) || slug.includes(aSlug);
+        return slugHit || (qHit(h) && qHit(a));
+      });
+      if (!game) continue;
+
+      // Figure out which team is the YES side. Prefer the slug or the
+      // "Will X win" phrasing at the front of the question.
+      const h = normName(game.home), a = normName(game.away);
+      let yesIsHome = null;
+      const firstWordHit = (name) => {
+        const w = name.split(" ").filter(x => x.length >= 4);
+        return w.some(x => q.startsWith(x) || q.startsWith("will " + x));
+      };
+      if (firstWordHit(h)) yesIsHome = true;
+      else if (firstWordHit(a)) yesIsHome = false;
+      else if (slug.includes(h.replace(/\s/g, "-") + "-win")) yesIsHome = true;
+      else if (slug.includes(a.replace(/\s/g, "-") + "-win")) yesIsHome = false;
+      if (yesIsHome == null) continue;
+
+      const bid = Number(poly.bestBid) || null;
+      const ask = Number(poly.bestAsk) || null;
+      const last = Number(poly.lastTradePrice) || null;
+      const predProb = bid && ask ? (bid + ask) / 2 : last;
+
+      const comp = buildComparison({
+        source: "polymarket",
+        marketId: poly.id || poly.slug,
+        marketUrl: poly.slug ? `https://polymarket.com/event/${poly.slug}` : "https://polymarket.com",
+        title: poly.question,
+        sportLabel: SPORT_CONFIGS[game.sportKey]?.label || "Sports",
+        sportKey: game.sportKey,
+        game,
+        yesIsHome,
+        predProb,
+        predBid: bid,
+        predAsk: ask,
+      });
+      if (comp) matches.push(comp);
+    }
+
+    // Largest positive EV first, then by absolute edge so break-evens still sort sensibly.
+    matches.sort((a, b) => {
+      const evA = a.bestBet.evPercent, evB = b.bestBet.evPercent;
+      if (evA !== evB) return evB - evA;
+      return Math.abs(b.bestBet.edgePP) - Math.abs(a.bestBet.edgePP);
     });
 
     res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
-      ...out,
-      totalMarkets: out.markets.length,
+      matches,
+      totalMatches: matches.length,
+      counts: {
+        kalshi: matches.filter(m => m.source === "kalshi").length,
+        polymarket: matches.filter(m => m.source === "polymarket").length,
+      },
       cachedAt: new Date().toISOString(),
     });
   } catch (err) {

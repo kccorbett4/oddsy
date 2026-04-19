@@ -2,36 +2,19 @@ import { useState, useEffect, useMemo } from "react";
 import { Helmet } from "react-helmet-async";
 import SiteNav from "./SiteNav.jsx";
 
-// Converts a prediction-market probability (0-1) to American odds. Prediction
-// markets are vig-free, so this is genuine "fair" odds — useful for comparing
-// against sportsbook lines. +150 and -200 bracket the meaningful range.
-function probToAmerican(p) {
-  if (!p || p <= 0 || p >= 1) return null;
-  if (p >= 0.5) return Math.round(-100 * p / (1 - p));
-  return Math.round(100 * (1 - p) / p);
-}
 const formatPct = (p) => (p == null ? "—" : `${(p * 100).toFixed(1)}%`);
 const formatOdds = (o) => (o == null ? "—" : o > 0 ? `+${o}` : `${o}`);
-const formatUSD = (n) => {
-  if (n == null) return "—";
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${Math.round(n)}`;
-};
 const formatClose = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
-  const now = new Date();
-  const hours = (d - now) / 3600000;
+  const hours = (d - new Date()) / 3600000;
   if (hours < 1) return `${Math.max(0, Math.round(hours * 60))}m`;
   if (hours < 24) return `${Math.round(hours)}h`;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
 const SPORT_ICONS = {
-  MLB: "⚾", NBA: "🏀", NFL: "🏈", NHL: "🏒", WNBA: "🏀",
-  MLS: "⚽", Soccer: "⚽", Tennis: "🎾", Golf: "⛳",
-  Fighting: "🥊", Other: "🎯",
+  MLB: "⚾", NBA: "🏀", NFL: "🏈", NHL: "🏒", WNBA: "🏀", MLS: "⚽",
 };
 
 export default function PredictionMarketsPage() {
@@ -40,6 +23,7 @@ export default function PredictionMarketsPage() {
   const [error, setError] = useState(null);
   const [source, setSource] = useState("all");
   const [sport, setSport] = useState("all");
+  const [onlyPositiveEv, setOnlyPositiveEv] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -56,37 +40,26 @@ export default function PredictionMarketsPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const markets = data?.markets || [];
+  const matches = data?.matches || [];
 
   const sportOptions = useMemo(() => {
-    const s = new Set(markets.map(m => m.sport).filter(Boolean));
-    return [...s].sort();
-  }, [markets]);
+    return [...new Set(matches.map(m => m.sport).filter(Boolean))].sort();
+  }, [matches]);
 
   const filtered = useMemo(() => {
-    return markets.filter(m => {
+    return matches.filter(m => {
       if (source !== "all" && m.source !== source) return false;
       if (sport !== "all" && m.sport !== sport) return false;
+      if (onlyPositiveEv && (m.bestBet?.evPercent ?? 0) <= 0) return false;
       return true;
     });
-  }, [markets, source, sport]);
-
-  // Group by event title so a matchup's yes/no pair sits together.
-  const grouped = useMemo(() => {
-    const byEvent = new Map();
-    for (const m of filtered) {
-      const key = `${m.source}:${m.title}:${m.closeTime || ""}`;
-      if (!byEvent.has(key)) byEvent.set(key, []);
-      byEvent.get(key).push(m);
-    }
-    return [...byEvent.values()];
-  }, [filtered]);
+  }, [matches, source, sport, onlyPositiveEv]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f6f8", fontFamily: "'DM Sans', system-ui, sans-serif", color: "#1a1d23" }}>
       <Helmet>
-        <title>Prediction Markets — Kalshi & Polymarket | MyOddsy</title>
-        <meta name="description" content="Live odds from Kalshi and Polymarket prediction markets. Vig-free probabilities you can compare against sportsbook lines to spot mispriced bets." />
+        <title>Prediction Market Value Detector — Kalshi vs Sportsbooks | MyOddsy</title>
+        <meta name="description" content="Compares vig-free Kalshi and Polymarket prices to live sportsbook moneylines. Spots every game where the book is priced soft vs where real money is settling." />
         <link rel="canonical" href="https://www.myoddsy.com/prediction-markets" />
       </Helmet>
 
@@ -102,23 +75,22 @@ export default function PredictionMarketsPage() {
         color: "#fff", padding: "26px 20px 22px",
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "0 0 6px" }}>🔮 Prediction Markets</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "0 0 6px" }}>🔮 Prediction Market Value</h1>
           <p style={{ fontSize: 13, color: "#bae6fd", margin: 0, lineHeight: 1.55, maxWidth: 780 }}>
-            Live sports markets from Kalshi and Polymarket. Prices are vig-free — a 60¢ YES
-            equals a 60% true probability. Cross-reference against sportsbook lines to find
-            bets where the book is priced weaker than where real money is settling.
+            For every game that's live on both Kalshi/Polymarket <b>and</b> a US sportsbook, we
+            compare the vig-free prediction-market probability against the book's devigged implied
+            probability. If the numbers disagree, one side is mispriced — and that's where the bet is.
           </p>
         </div>
       </header>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 14px 110px" }}>
-        {/* Filters */}
         <div style={{
           background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
           padding: "12px 14px", marginBottom: 14, display: "flex", flexWrap: "wrap",
           alignItems: "center", gap: 12,
         }}>
-          <label style={{ fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={filterLabel}>
             Source:
             <select value={source} onChange={e => setSource(e.target.value)} style={selectStyle}>
               <option value="all">All</option>
@@ -128,7 +100,7 @@ export default function PredictionMarketsPage() {
           </label>
 
           {sportOptions.length > 1 && (
-            <label style={{ fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={filterLabel}>
               Sport:
               <select value={sport} onChange={e => setSport(e.target.value)} style={selectStyle}>
                 <option value="all">All sports</option>
@@ -139,6 +111,16 @@ export default function PredictionMarketsPage() {
             </label>
           )}
 
+          <label style={{ ...filterLabel, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={onlyPositiveEv}
+              onChange={e => setOnlyPositiveEv(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            Only +EV bets
+          </label>
+
           <button onClick={load} style={{
             marginLeft: "auto", padding: "6px 14px",
             background: "#0284c7", color: "#fff", border: 0, borderRadius: 8,
@@ -146,61 +128,26 @@ export default function PredictionMarketsPage() {
           }}>↻ Refresh</button>
         </div>
 
-        {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Loading markets…</div>}
+        {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Comparing markets…</div>}
         {error && <div style={{ padding: 16, background: "#fef2f2", color: "#b91c1c", borderRadius: 8, fontSize: 13 }}>Error: {error}</div>}
 
         {!loading && !error && filtered.length === 0 && (
           <div style={{ padding: 40, textAlign: "center", color: "#888", fontSize: 13 }}>
-            No live markets match these filters right now.
+            {onlyPositiveEv
+              ? "No +EV matchups right now. Turn off the +EV filter to see all matched games."
+              : "No prediction markets matched a live sportsbook game. Come back closer to game time."}
           </div>
         )}
 
         {!loading && filtered.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {grouped.map((group, gi) => {
-              const first = group[0];
-              const sportIcon = SPORT_ICONS[first.sport] || "🎯";
-              return (
-                <div key={gi} style={{
-                  background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
-                  padding: "12px 14px", boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
-                }}>
-                  <div style={{
-                    display: "flex", justifyContent: "space-between",
-                    alignItems: "flex-start", gap: 8, marginBottom: 8, flexWrap: "wrap",
-                  }}>
-                    <div>
-                      <div style={{
-                        fontSize: 10, color: "#64748b", textTransform: "uppercase",
-                        letterSpacing: 0.6, fontWeight: 700, marginBottom: 2,
-                      }}>
-                        {sportIcon} {first.sport} · <SourceBadge source={first.source} /> · closes {formatClose(first.closeTime)}
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
-                        {first.title}
-                      </div>
-                    </div>
-                    <a href={first.url} target="_blank" rel="noopener noreferrer" style={{
-                      fontSize: 11, color: "#0284c7", textDecoration: "none", fontWeight: 700, whiteSpace: "nowrap",
-                    }}>
-                      Open on {first.source === "kalshi" ? "Kalshi" : "Polymarket"} →
-                    </a>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: group.length >= 2 ? "1fr 1fr" : "1fr", gap: 8 }}>
-                    {group.map(m => (
-                      <SideCard key={m.id} market={m} />
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {filtered.map(m => <ValueCard key={`${m.source}:${m.marketId}`} match={m} />)}
           </div>
         )}
 
         {data && (
           <div style={{ marginTop: 22, fontSize: 10, color: "#94a3b8", textAlign: "center", lineHeight: 1.6 }}>
-            {data.totalMarkets} markets · Kalshi: {data.sources?.kalshi?.count || 0} · Polymarket: {data.sources?.polymarket?.count || 0}
+            {data.totalMatches} total matched markets · Kalshi {data.counts?.kalshi || 0} · Polymarket {data.counts?.polymarket || 0}
             <br />
             Updated {data.cachedAt ? new Date(data.cachedAt).toLocaleTimeString() : "—"}
           </div>
@@ -210,35 +157,124 @@ export default function PredictionMarketsPage() {
   );
 }
 
-function SideCard({ market }) {
-  const prob = market.yesPrice;
-  const american = probToAmerican(prob);
-  const spread = market.yesBid && market.yesAsk ? (market.yesAsk - market.yesBid) : null;
+function ValueCard({ match }) {
+  const { predictionMarket, book, bestBet, teams, commenceTime, sport } = match;
+  const sportIcon = SPORT_ICONS[sport] || "🎯";
+  const ev = bestBet.evPercent;
+  const evColor = ev >= 3 ? "#15803d" : ev >= 0 ? "#0284c7" : "#64748b";
+  const evBg = ev >= 3 ? "#dcfce7" : ev >= 0 ? "#e0f2fe" : "#f1f5f9";
+
   return (
     <div style={{
-      padding: "10px 12px", border: "1px solid #e2e8f0", borderRadius: 10,
-      background: "#f8fafc",
+      background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
+      padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
     }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
-        {market.subtitle || "YES"}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700, marginBottom: 2 }}>
+            {sportIcon} {sport} · <SourceBadge source={match.source} /> · starts {formatClose(commenceTime)}
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>
+            {teams.away} <span style={{ color: "#94a3b8" }}>@</span> {teams.home}
+          </div>
+        </div>
+        <div style={{
+          padding: "6px 10px", borderRadius: 8, background: evBg, color: evColor,
+          fontSize: 12, fontWeight: 900, fontFamily: "'Space Mono', monospace",
+          display: "flex", flexDirection: "column", alignItems: "flex-end",
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            {ev > 0 ? "Value bet" : ev === 0 ? "Fair" : "No edge"}
+          </span>
+          <span style={{ fontSize: 16 }}>{ev > 0 ? `+${ev.toFixed(1)}%` : `${ev.toFixed(1)}%`} EV</span>
+        </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <span style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: "#0c4a6e" }}>
-          {formatPct(prob)}
-        </span>
-        <span style={{ fontSize: 13, color: "#64748b", fontFamily: "'Space Mono', monospace" }}>
-          {formatOdds(american)}
-        </span>
+
+      {/* Recommendation */}
+      {ev > 0 && (
+        <div style={{
+          padding: "10px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0",
+          borderRadius: 10, marginBottom: 10,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#15803d", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>
+            ✓ Recommendation
+          </div>
+          <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.4 }}>
+            Back <b>{bestBet.team}</b> at <b>{bestBet.book}</b>
+            <span style={{ fontFamily: "'Space Mono', monospace", marginLeft: 6 }}>
+              ({formatOdds(bestBet.americanOdds)})
+            </span>
+            <span style={{ color: "#15803d", fontWeight: 700, marginLeft: 6 }}>
+              +{bestBet.edgePP.toFixed(1)}pp edge
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "#166534", marginTop: 3 }}>
+            Prediction market implies <b>{formatPct(bestBet.predProb)}</b> · book devigs to <b>{formatPct(bestBet.devigProb)}</b>.
+          </div>
+        </div>
+      )}
+
+      {/* Side-by-side comparison */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <SideColumn
+          label={teams.home}
+          isBest={bestBet.side === "home"}
+          pred={predictionMarket.homeProb}
+          book={book.home}
+        />
+        <SideColumn
+          label={teams.away}
+          isBest={bestBet.side === "away"}
+          pred={predictionMarket.awayProb}
+          book={book.away}
+        />
       </div>
-      <div style={{ fontSize: 10, color: "#94a3b8", display: "flex", justifyContent: "space-between" }}>
-        <span>
-          {market.yesBid != null && market.yesAsk != null
-            ? `${(market.yesBid * 100).toFixed(0)}¢ / ${(market.yesAsk * 100).toFixed(0)}¢`
-            : market.lastPrice ? `last ${(market.lastPrice * 100).toFixed(0)}¢` : ""}
-        </span>
-        <span>
-          {market.volume ? `vol ${formatUSD(market.volume)}` : market.liquidity ? `liq ${formatUSD(market.liquidity)}` : ""}
-        </span>
+
+      <div style={{
+        marginTop: 10, fontSize: 10, color: "#94a3b8", display: "flex",
+        justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4,
+      }}>
+        <span>Prediction YES: {predictionMarket.yesTeam}</span>
+        <a href={match.marketUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0284c7", fontWeight: 700, textDecoration: "none" }}>
+          View on {match.source === "kalshi" ? "Kalshi" : "Polymarket"} →
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function SideColumn({ label, isBest, pred, book }) {
+  const diff = pred - book.devigProb;
+  const diffColor = diff > 0.01 ? "#15803d" : diff < -0.01 ? "#b91c1c" : "#64748b";
+  return (
+    <div style={{
+      padding: "10px 12px", borderRadius: 10,
+      background: isBest ? "#f0fdf4" : "#f8fafc",
+      border: `1px solid ${isBest ? "#bbf7d0" : "#e2e8f0"}`,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: "#1e293b", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+        {isBest && <span style={{ color: "#15803d" }}>★</span>}
+        {label}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 11 }}>
+        <div style={{ color: "#64748b" }}>Prediction</div>
+        <div style={{ textAlign: "right", fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>{formatPct(pred)}</div>
+
+        <div style={{ color: "#64748b" }}>Book devig</div>
+        <div style={{ textAlign: "right", fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>{formatPct(book.devigProb)}</div>
+
+        <div style={{ color: "#64748b" }}>Best price</div>
+        <div style={{ textAlign: "right", fontFamily: "'Space Mono', monospace", fontWeight: 800, color: "#0c4a6e" }}>
+          {formatOdds(book.americanOdds)}
+        </div>
+
+        <div style={{ color: "#64748b" }}>Via</div>
+        <div style={{ textAlign: "right", fontSize: 10, color: "#475569" }}>{book.bestBook}</div>
+
+        <div style={{ color: "#64748b" }}>Diff</div>
+        <div style={{ textAlign: "right", fontFamily: "'Space Mono', monospace", fontWeight: 800, color: diffColor }}>
+          {diff >= 0 ? "+" : ""}{(diff * 100).toFixed(1)}pp
+        </div>
       </div>
     </div>
   );
@@ -250,8 +286,7 @@ function SourceBadge({ source }) {
   return (
     <span style={{
       display: "inline-block", padding: "1px 6px", borderRadius: 4,
-      background: `${color}22`, color, fontWeight: 800, fontSize: 9,
-      letterSpacing: 0.4,
+      background: `${color}22`, color, fontWeight: 800, fontSize: 9, letterSpacing: 0.4,
     }}>{label}</span>
   );
 }
@@ -260,3 +295,4 @@ const selectStyle = {
   padding: "6px 8px", borderRadius: 6, border: "1px solid #cbd5e1",
   fontSize: 12, fontFamily: "inherit", background: "#fff",
 };
+const filterLabel = { fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 };

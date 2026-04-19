@@ -55,7 +55,7 @@ const MORE_ITEMS = [
   { path: "/homeruns", label: "HR Hunter", icon: "💣", desc: "Top home run props" },
   { path: "/shop", label: "Book Shop", icon: "🏦", desc: "Compare live odds" },
   { path: "/arbitrage", label: "Arbitrage", icon: "🔄", desc: "Guaranteed-profit bets" },
-  { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi & Polymarket" },
+  { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi vs books — find value" },
   { path: "/strategy-builder", label: "Build Your Own", icon: "🛠️", desc: "Custom pick filters" },
   { path: "/record", label: "Track Record", icon: "📈", desc: "Historical performance" },
 ];

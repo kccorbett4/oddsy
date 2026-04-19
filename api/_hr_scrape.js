@@ -204,6 +204,100 @@ async function scrapeFanDuel() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Bovada
+// ────────────────────────────────────────────────────────────────────
+// Bovada IS carried by The Odds API for main markets (moneyline, spread,
+// total) — that's why it already shows up on the Shop/Arbitrage/Picks
+// feeds. But The Odds API doesn't return Bovada's `batter_home_runs`
+// market on our plan tier, so HR props were the one gap. This scraper
+// hits Bovada's public coupon endpoint to fill just that gap. Flow:
+//   1. GET /services/sports/event/coupon/events/A/description/baseball/mlb
+//      → array of events, each with a { link, description } slug.
+//   2. GET /services/sports/event/coupon/events/A/description{link}
+//      → the full event with displayGroups[].markets[], where
+//      description === "Player to hit a Home Run" is the anytime-HR market
+//      ("Player to hit 2+ Home Runs" and "the first Home Run" are
+//      separate markets we skip).
+// Outcome descriptions are "Player Name (TEAM)" — we strip the team tag
+// so name matching against Odds-API events works.
+async function scrapeBovada() {
+  const base = "https://www.bovada.lv/services/sports/event/coupon/events/A/description";
+  const listUrl = `${base}/baseball/mlb?marketFilterId=def&preMatchOnly=true&eventsLimit=50&lang=en`;
+  const list = await jfetch(listUrl);
+
+  // Bovada wraps responses in an array of groups; walk everything and
+  // collect anything with an `events` array into `target`.
+  const collectEvents = (node, target) => {
+    if (!node) return;
+    if (Array.isArray(node)) { node.forEach(n => collectEvents(n, target)); return; }
+    if (Array.isArray(node.events)) target.push(...node.events);
+    if (Array.isArray(node.path)) node.path.forEach(n => collectEvents(n, target));
+  };
+  const rawEvents = [];
+  collectEvents(list, rawEvents);
+
+  const seen = new Set();
+  const uniqEvents = rawEvents.filter(e => {
+    if (!e?.link || !e?.description) return false;
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
+
+  const out = [];
+  const chunk = 4;
+  for (let i = 0; i < uniqEvents.length; i += chunk) {
+    const batch = uniqEvents.slice(i, i + chunk);
+    const results = await Promise.allSettled(batch.map(async ev => {
+      const detail = await jfetch(`${base}${ev.link}?lang=en`);
+      const detailEvents = [];
+      collectEvents(detail, detailEvents);
+
+      const byPlayer = {};
+      // Walk the returned event(s); typically one, but handle multi.
+      for (const det of detailEvents) {
+        for (const dg of (det.displayGroups || [])) {
+          for (const m of (dg.markets || [])) {
+            const desc = (m.description || "").trim().toLowerCase();
+            if (desc !== "player to hit a home run") continue;
+            for (const o of (m.outcomes || [])) {
+              const priceStr = (o.price?.american || "").toString().toUpperCase();
+              const americanRaw = priceStr === "EVEN" ? 100 : parseInt(priceStr, 10);
+              if (!Number.isFinite(americanRaw)) continue;
+              // Strip " (TEAM)" suffix — e.g. "Aaron Judge (NYY)" → "Aaron Judge"
+              const name = (o.description || "").replace(/\s*\([A-Z0-9]{2,4}\)\s*$/, "").trim();
+              if (!name) continue;
+              byPlayer[name] = {
+                book: "Bovada",
+                point: 0.5,
+                overAmerican: americanRaw,
+                overDecimal: +americanToDecimal(americanRaw).toFixed(3),
+              };
+            }
+          }
+        }
+      }
+
+      // Bovada event descriptions are "Away @ Home".
+      const [away, home] = (ev.description || "").split(" @ ").map(s => (s || "").trim());
+      return {
+        eventId: ev.id,
+        home, away,
+        commence: ev.startTime,
+        name: ev.description,
+        players: Object.entries(byPlayer).map(([name, price]) => ({
+          name, books: [price],
+        })),
+      };
+    }));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.players.length > 0) out.push(r.value);
+    }
+  }
+  return out;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Public entrypoint
 // ────────────────────────────────────────────────────────────────────
 // DK was dropped from the scraper on 2026-04-19 — their Nash API is
@@ -211,15 +305,20 @@ async function scrapeFanDuel() {
 // already returns DraftKings HR lines under `batter_home_runs`, so the
 // scraper was redundant when it worked and an alert source when it
 // didn't. FanDuel stays: Odds API coverage for FD HR props is spottier.
+// Bovada is in The Odds API for main markets but not for HR props on our
+// plan — the scraper fills just the HR gap.
 // If DK HR coverage regresses, re-introduce via a proxy (Cloudflare
 // Worker on a residential/non-cloud ASN).
 export async function fetchScrapedHr() {
-  const [fd] = await Promise.allSettled([scrapeFanDuel()]);
+  const [fd, bv] = await Promise.allSettled([scrapeFanDuel(), scrapeBovada()]);
   return {
     draftkings: { ok: true, events: [], eventCount: 0, skipped: "covered by Odds API" },
     fanduel: fd.status === "fulfilled"
       ? { ok: true, events: fd.value, eventCount: fd.value.length }
       : { ok: false, error: fd.reason?.message || String(fd.reason), events: [] },
+    bovada: bv.status === "fulfilled"
+      ? { ok: true, events: bv.value, eventCount: bv.value.length }
+      : { ok: false, error: bv.reason?.message || String(bv.reason), events: [] },
   };
 }
 
@@ -238,6 +337,7 @@ export function mergeScrapedIntoEvents(events, scraped, bookName) {
     .toLowerCase().replace(/\./g, "")
     .replace(/\s+/g, " ").trim();
   const playerKey = (s) => (s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[.'`]/g, "")
     .replace(/\s+/g, " ").trim();
 

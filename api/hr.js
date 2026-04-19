@@ -32,16 +32,19 @@ const americanToDecimal = (a) => {
   return a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
 };
 
-// HR props are hard-pinned to The Odds API. Parlay-api's catalog only
-// carries DFS-app HR lines (PrizePicks/Underdog/Sleeper/Fliff/Betr) under
-// `player_home_runs` — no DraftKings, FanDuel, Caesars, BetMGM, BetRivers,
-// Fanatics, Hard Rock, etc. The Odds API's `batter_home_runs` market has
-// the traditional sportsbooks we actually need, so we ignore ODDS_PROVIDER
-// here and always use The Odds API for HR data.
+// HR props are anchored to The Odds API (DK/FD/MGM/Caesars/theScore/etc.).
+// Parlay-api's /props endpoint is a separate, flat-array feed that adds
+// Bet365 plus DFS-style books (Underdog, Fliff, Betr). We pull it in
+// additively as a scraper-style supplement — the shape differs completely
+// from /odds so it needs its own parser.
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const HR_MARKET_KEY = "batter_home_runs";
+const PARLAY_API_BASE = "https://parlay-api.com/v1";
 function oddsApiKey() {
   return process.env.ODDS_API_KEY;
+}
+function parlayApiKey() {
+  return process.env.PARLAY_API_KEY;
 }
 
 // ──────────────────────── context handler ────────────────────────
@@ -435,11 +438,146 @@ async function handleContext(req, res) {
   }
 }
 
+// ──────────────────────── parlay-api props ────────────────────────
+// Fetches player_home_runs from parlay-api's flat-array /props endpoint
+// and groups into the same per-book scraper shape as fetchScrapedHr so
+// mergeScrapedIntoEvents can attach the lines to the main events list.
+//
+// Shape returned by upstream is one record per (player, book, line).
+// We only keep the 0.5 anytime-HR line, drop `player_home_runs_alt`, and
+// drop flat-payout DFS records (Betr) whose over/under is locked at
+// +100/-100 and carries no real price signal.
+const NAME_NORM_REGEX = /[\u0300-\u036f]/g;
+function stripDiacritics(s) {
+  return (s || "").normalize("NFD").replace(NAME_NORM_REGEX, "");
+}
+
+async function fetchParlayApiHr() {
+  const key = parlayApiKey();
+  if (!key) return { ok: false, error: "PARLAY_API_KEY not configured", events: [] };
+  const url = `${PARLAY_API_BASE}/sports/baseball_mlb/props?apiKey=${key}&markets=player_home_runs`;
+  let resp;
+  try {
+    resp = await fetch(url);
+  } catch (e) {
+    return { ok: false, error: `fetch failed: ${e.message}`, events: [] };
+  }
+  if (!resp.ok) {
+    return { ok: false, error: `parlay-api ${resp.status}`, events: [] };
+  }
+  const raw = await resp.json();
+  const rows = Array.isArray(raw) ? raw : [];
+
+  // Group by (event, book, player) → keep only the 0.5 line per combo.
+  // Key collisions are common because parlay-api sometimes duplicates a
+  // book/player with stale rows alongside fresh ones; the latest last_update
+  // wins.
+  const byEvent = new Map();
+  for (const r of rows) {
+    if (r?.market_key !== "player_home_runs") continue;
+    if (r?.is_dfs_flat_payout === true) continue;
+    if (!Number.isFinite(r.over_price)) continue;
+    if (Number(r.line) !== 0.5) continue;
+    const evKey = r.canonical_event_id || `${r.home_team}|${r.away_team}|${r.commence_time}`;
+    if (!evKey) continue;
+    if (!byEvent.has(evKey)) {
+      byEvent.set(evKey, {
+        eventId: r.canonical_event_id || null,
+        home: r.home_team,
+        away: r.away_team,
+        commence: r.commence_time,
+        name: `${r.away_team} @ ${r.home_team}`,
+        perBookPlayer: new Map(),
+      });
+    }
+    const ev = byEvent.get(evKey);
+    const bookTitle = r.bookmaker_title || r.bookmaker || "Unknown";
+    const playerName = stripDiacritics(r.player || "").trim();
+    if (!playerName) continue;
+    const comboKey = `${bookTitle}::${playerName}`;
+    const prev = ev.perBookPlayer.get(comboKey);
+    if (prev && prev.last_update && r.last_update && prev.last_update >= r.last_update) continue;
+    ev.perBookPlayer.set(comboKey, {
+      book: bookTitle,
+      player: playerName,
+      overAmerican: Number(r.over_price),
+      last_update: r.last_update,
+    });
+  }
+
+  const events = [];
+  for (const ev of byEvent.values()) {
+    const byPlayer = {};
+    for (const row of ev.perBookPlayer.values()) {
+      if (!byPlayer[row.player]) byPlayer[row.player] = [];
+      byPlayer[row.player].push({
+        book: row.book,
+        point: 0.5,
+        overAmerican: row.overAmerican,
+        overDecimal: +americanToDecimal(row.overAmerican).toFixed(3),
+      });
+    }
+    events.push({
+      eventId: ev.eventId,
+      home: ev.home, away: ev.away, commence: ev.commence, name: ev.name,
+      players: Object.entries(byPlayer).map(([name, books]) => ({ name, books })),
+    });
+  }
+  return { ok: true, events, eventCount: events.length, rowCount: rows.length };
+}
+
+// Merge a parlay-api result into the main events list. Unlike
+// mergeScrapedIntoEvents (which hardcodes one bookName), each row here
+// already carries its own book name, so we attach books[] per player
+// directly.
+function mergeParlayApiIntoEvents(events, parlay) {
+  const normTeam = (s) => (s || "").toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+  const playerKey = (s) => stripDiacritics(s || "").toLowerCase().replace(/[.'`]/g, "").replace(/\s+/g, " ").trim();
+  let attached = 0, skippedAmbiguous = 0;
+
+  for (const pEv of (parlay.events || [])) {
+    const h = normTeam(pEv.home), a = normTeam(pEv.away);
+    if (!h || !a) continue;
+    const target = events.find(e =>
+      (normTeam(e.home) === h && normTeam(e.away) === a) ||
+      (normTeam(e.home) === a && normTeam(e.away) === h)
+    );
+    if (!target) continue;
+
+    const nameCounts = {};
+    for (const p of target.players) {
+      const k = playerKey(p.name);
+      nameCounts[k] = (nameCounts[k] || 0) + 1;
+    }
+
+    for (const pP of pEv.players) {
+      const k = playerKey(pP.name);
+      if (nameCounts[k] > 1) { skippedAmbiguous++; continue; }
+      const existing = target.players.find(p => playerKey(p.name) === k);
+      if (existing) {
+        for (const priceRow of pP.books) {
+          if (!existing.books.some(b => b.book === priceRow.book)) {
+            existing.books.push(priceRow);
+            attached++;
+          }
+        }
+      } else {
+        target.players.push({ name: pP.name, books: pP.books });
+        nameCounts[k] = (nameCounts[k] || 0) + 1;
+        attached += pP.books.length;
+      }
+    }
+  }
+  return { attached, skippedAmbiguous };
+}
+
 // ──────────────────────── odds handler ────────────────────────
 const ODDS_KEY = "hrodds:v1";
 const ODDS_TTL = 6 * 3600;
 const SCRAPE_KEY = "hrscrape:v1";
 const SCRAPE_TTL = 6 * 3600;
+const PARLAY_KEY = "hrparlay:v1";
+const PARLAY_TTL = 2 * 3600;
 
 async function handleOdds(req, res) {
   const API_KEY = oddsApiKey();
@@ -556,7 +694,13 @@ async function handleOdds(req, res) {
     }
     if (!scraped) {
       try { scraped = await fetchScrapedHr(); }
-      catch (e) { scraped = { draftkings: { ok: false, error: e.message, events: [] }, fanduel: { ok: false, error: e.message, events: [] } }; }
+      catch (e) {
+        scraped = {
+          draftkings: { ok: false, error: e.message, events: [] },
+          fanduel: { ok: false, error: e.message, events: [] },
+          bovada: { ok: false, error: e.message, events: [] },
+        };
+      }
       if (redis) {
         try { await redis.set(SCRAPE_KEY, JSON.stringify(scraped), { EX: SCRAPE_TTL }); } catch {}
       }
@@ -564,11 +708,35 @@ async function handleOdds(req, res) {
 
     let dkResult = { attached: 0, skippedAmbiguous: 0 };
     let fdResult = { attached: 0, skippedAmbiguous: 0 };
+    let bvResult = { attached: 0, skippedAmbiguous: 0 };
     if (scraped?.draftkings?.ok) {
       dkResult = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
     }
     if (scraped?.fanduel?.ok) {
       fdResult = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
+    }
+    if (scraped?.bovada?.ok) {
+      bvResult = mergeScrapedIntoEvents(events, scraped.bovada, "Bovada");
+    }
+
+    // Parlay-api /props: Bet365 + DFS (Underdog/Fliff). Cached separately
+    // from the scraper cache so a parlay-api outage doesn't cascade.
+    let parlay = null;
+    if (redis && !force) {
+      try {
+        const c = await redis.get(PARLAY_KEY);
+        if (c) parlay = JSON.parse(c);
+      } catch {}
+    }
+    if (!parlay) {
+      parlay = await fetchParlayApiHr();
+      if (redis && parlay?.ok) {
+        try { await redis.set(PARLAY_KEY, JSON.stringify(parlay), { EX: PARLAY_TTL }); } catch {}
+      }
+    }
+    let parlayResult = { attached: 0, skippedAmbiguous: 0 };
+    if (parlay?.ok) {
+      parlayResult = mergeParlayApiIntoEvents(events, parlay);
     }
 
     const payload = {
@@ -583,6 +751,12 @@ async function handleOdds(req, res) {
         fanduel: scraped?.fanduel?.ok
           ? { ok: true, eventCount: scraped.fanduel.eventCount, ...fdResult }
           : { ok: false, error: scraped?.fanduel?.error || "unknown", attached: 0 },
+        bovada: scraped?.bovada?.ok
+          ? { ok: true, eventCount: scraped.bovada.eventCount, ...bvResult }
+          : { ok: false, error: scraped?.bovada?.error || "unknown", attached: 0 },
+        parlayApi: parlay?.ok
+          ? { ok: true, eventCount: parlay.eventCount, rowCount: parlay.rowCount, ...parlayResult }
+          : { ok: false, error: parlay?.error || "unknown", attached: 0 },
       },
     };
 
@@ -726,10 +900,13 @@ async function handleHealthcheck(req, res) {
     const status = {
       draftkings: scraped?.draftkings?.ok ? "ok" : (scraped?.draftkings?.error || "unknown"),
       fanduel: scraped?.fanduel?.ok ? "ok" : (scraped?.fanduel?.error || "unknown"),
+      bovada: scraped?.bovada?.ok ? "ok" : (scraped?.bovada?.error || "unknown"),
     };
     const alerts = [];
 
-    for (const book of ["draftkings", "fanduel"]) {
+    // DraftKings is intentionally skipped — its scraper is disabled
+    // (see _hr_scrape.js) and the healthcheck would false-positive.
+    for (const book of ["fanduel", "bovada"]) {
       const failKey = `hralert:fails:${book}`;
       const notifiedKey = `hralert:notified:${book}`;
       const ok = scraped?.[book]?.ok === true;
@@ -751,7 +928,9 @@ async function handleHealthcheck(req, res) {
       }
 
       if (fails >= 2 && !alreadyNotified) {
-        const title = book === "draftkings" ? "DraftKings" : "FanDuel";
+        const title = book === "draftkings" ? "DraftKings"
+          : book === "fanduel" ? "FanDuel"
+          : "Bovada";
         const err = scraped?.[book]?.error || "unknown error";
         const html = `<!doctype html><html><body style="font-family:system-ui,sans-serif;padding:20px;background:#f5f6f8;">
           <div style="max-width:520px;margin:auto;background:#fff;padding:20px;border-radius:12px;">

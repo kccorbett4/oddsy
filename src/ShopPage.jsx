@@ -229,7 +229,9 @@ function GameCard({ game, market }) {
           </thead>
           <tbody>
             {outcomes.map(out => {
-              const best = Math.max(...Object.values(out.byBook));
+              const uniquePrices = [...new Set(Object.values(out.byBook))].sort((a, b) => b - a);
+              const best = uniquePrices[0];
+              const secondBest = uniquePrices[1];
               const pointStr = out.point !== null && out.point !== undefined
                 ? (out.point > 0 ? ` +${out.point}` : ` ${out.point}`) : "";
               return (
@@ -241,13 +243,14 @@ function GameCard({ game, market }) {
                     const price = out.byBook[b];
                     if (price === undefined) return <td key={b} style={{ ...tdStyle(), color: "#c7ccd4" }}>—</td>;
                     const isBest = price === best;
+                    const isSecondBest = !isBest && price === secondBest;
                     return (
                       <td key={b} style={{
                         ...tdStyle(),
                         fontFamily: "'Space Mono', monospace",
-                        fontWeight: isBest ? 900 : 500,
-                        background: isBest ? "#d1fae5" : "transparent",
-                        color: isBest ? "#065f46" : "#1a1d23",
+                        fontWeight: isBest ? 900 : isSecondBest ? 700 : 500,
+                        background: isBest ? "#d1fae5" : isSecondBest ? "#ecfdf5" : "transparent",
+                        color: isBest ? "#065f46" : isSecondBest ? "#047857" : "#1a1d23",
                       }}>
                         {formatOdds(price)}
                       </td>
