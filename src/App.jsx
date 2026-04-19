@@ -892,31 +892,36 @@ const UnitsInfo = ({ units, dark = false }) => {
             </div>
 
             <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.6, marginBottom: 14 }}>
-              A <strong>unit</strong> is just the amount of money you bet on each pick. <strong>You decide what it is.</strong>
+              A <strong>unit</strong> is the amount of money you bet <strong>on each pick</strong>. You decide what that is — and you keep it the same every time.
             </div>
 
             <div style={{ background: "#f5f6f8", borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#1a1d23", lineHeight: 1.6 }}>
-              If you bet <strong>$10</strong> per pick → your unit is $10.<br />
-              If you bet <strong>$50</strong> per pick → your unit is $50.<br />
-              If you bet <strong>$100</strong> per pick → your unit is $100.
-            </div>
-
-            <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.6, marginBottom: 14 }}>
-              This strategy is <strong>{direction} {abs.toFixed(2)} units</strong>. That means if you'd placed the same bet on every pick, your profit is <strong>{abs.toFixed(2)} × your bet size</strong>.
+              If you bet <strong>$10</strong> every pick → your unit is $10.<br />
+              If you bet <strong>$50</strong> every pick → your unit is $50.<br />
+              If you bet <strong>$100</strong> every pick → your unit is $100.
             </div>
 
             <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-              What that means in dollars
+              How it adds up over many bets
+            </div>
+            <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.6, marginBottom: 14 }}>
+              Every pick earns or loses units based on the odds. A win at −110 is about <strong>+0.91u</strong>. A loss is always <strong>−1u</strong>. A win at +200 is <strong>+2u</strong>. Over a whole season the wins and losses add up.
+              <br /><br />
+              This strategy's total is <strong style={{ color: profitColor }}>{sign}{abs.toFixed(2)}u</strong>. That's the sum of every recommended pick — wins and losses combined.
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+              Your total profit if you'd followed every pick
             </div>
             <div style={{ fontSize: 13, color: "#1a1d23", lineHeight: 1.9, marginBottom: 14 }}>
-              <div>Bet $10/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 10)}</strong></div>
-              <div>Bet $50/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 50)}</strong></div>
-              <div>Bet $100/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 100)}</strong></div>
-              <div>Bet $1,000/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 1000)}</strong></div>
+              <div>Betting $10 each &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 10)}</strong></div>
+              <div>Betting $50 each &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 50)}</strong></div>
+              <div>Betting $100 each &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 100)}</strong></div>
+              <div>Betting $1,000 each &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 1000)}</strong></div>
             </div>
 
             <div style={{ fontSize: 11, color: "#8b919a", lineHeight: 1.55, paddingTop: 10, borderTop: "1px solid #f0f1f3" }}>
-              Units let you compare strategies without knowing anyone's bet size. A win on a +200 underdog counts as +2u; a win on a −150 favorite counts as +0.67u. Bigger payouts, bigger units.
+              Why units instead of dollars? Because a win on a +200 underdog doubles your bet, but a win on a −150 favorite only returns about two-thirds of it. Units handle that math so the track record works no matter what size you play.
             </div>
           </div>
         </div>
