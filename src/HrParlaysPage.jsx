@@ -140,18 +140,6 @@ export default function HrParlaysPage() {
             ))}
           </div>
 
-          <button
-            onClick={() => { setRefreshing(true); loadData(true); }}
-            disabled={refreshing}
-            style={{
-              marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
-              border: "1px solid #4c1d95", background: "#fff", color: "#4c1d95",
-              fontSize: 12, fontWeight: 700, cursor: refreshing ? "wait" : "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
-            {refreshing ? "Refreshing…" : "↻ Refresh"}
-          </button>
         </div>
 
         {error && (

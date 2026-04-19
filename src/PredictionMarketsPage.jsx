@@ -121,11 +121,6 @@ export default function PredictionMarketsPage() {
             Only +EV bets
           </label>
 
-          <button onClick={load} style={{
-            marginLeft: "auto", padding: "6px 14px",
-            background: "#0284c7", color: "#fff", border: 0, borderRadius: 8,
-            fontSize: 12, fontWeight: 700, cursor: "pointer",
-          }}>↻ Refresh</button>
         </div>
 
         {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Comparing markets…</div>}

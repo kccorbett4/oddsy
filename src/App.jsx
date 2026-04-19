@@ -1911,22 +1911,9 @@ export default function App() {
             <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
               We couldn't reach the odds provider. This can happen during off-hours or if no games are currently scheduled.
             </div>
-            <button
-              onClick={() => { localStorage.removeItem("oddsy_odds_cache:v2"); localStorage.removeItem("oddsy_odds_cache"); setRefreshKey(k => k + 1); }}
-              style={{
-                padding: "8px 20px",
-                borderRadius: 8,
-                border: "1px solid #fecaca",
-                background: "#fff",
-                color: "#dc2626",
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              Retry
-            </button>
+            <div style={{ fontSize: 11, color: "#94a3b8" }}>
+              Fresh data loads automatically every few minutes.
+            </div>
           </div>
         )}
 

@@ -147,12 +147,6 @@ export default function ArbitragePage() {
           />
         </label>
 
-        <button
-          onClick={() => loadData(sport)}
-          style={{ marginLeft: "auto", padding: "6px 14px", background: "#1a73e8", color: "#fff", border: 0, borderRadius: 6, fontSize: 13, cursor: "pointer" }}
-        >
-          Refresh
-        </button>
       </div>
 
       {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Loading opportunities…</div>}

@@ -6,18 +6,31 @@
 // posted on US sportsbooks (via The Odds API h2h market), so every row
 // on the page has an apples-to-apples bet you can place somewhere.
 
+import { getRedis } from "./_redis.js";
+
 const KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2";
 const POLY_BASE = "https://gamma-api.polymarket.com";
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
 
+const CACHE_KEY = "predmkt:v2";
+const CACHE_TTL_SECONDS = 15 * 60;
+
+// kalshiSlug is the human-readable series title Kalshi uses in its public
+// URL path (matches the "title" field returned by /series/{ticker}, slugified).
+// URL format: kalshi.com/markets/{series-lower}/{kalshiSlug}/{event-ticker-lower}
 const SPORT_CONFIGS = {
-  baseball_mlb:         { kalshi: "KXMLBGAME",  label: "MLB",  seasonMonths: [2,3,4,5,6,7,8,9] },
-  basketball_nba:       { kalshi: "KXNBAGAME",  label: "NBA",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
-  icehockey_nhl:        { kalshi: "KXNHLGAME",  label: "NHL",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
-  americanfootball_nfl: { kalshi: "KXNFLGAME",  label: "NFL",  seasonMonths: [7,8,9,10,11,0,1] },
-  basketball_wnba:      { kalshi: "KXWNBAGAME", label: "WNBA", seasonMonths: [4,5,6,7,8,9] },
-  soccer_usa_mls:       { kalshi: "KXMLSGAME",  label: "MLS",  seasonMonths: [1,2,3,4,5,6,7,8,9,10] },
+  baseball_mlb:         { kalshi: "KXMLBGAME",  kalshiSlug: "professional-baseball-game",  label: "MLB",  seasonMonths: [2,3,4,5,6,7,8,9] },
+  basketball_nba:       { kalshi: "KXNBAGAME",  kalshiSlug: "professional-basketball-game", label: "NBA",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
+  icehockey_nhl:        { kalshi: "KXNHLGAME",  kalshiSlug: "nhl-game",                     label: "NHL",  seasonMonths: [9,10,11,0,1,2,3,4,5] },
+  americanfootball_nfl: { kalshi: "KXNFLGAME",  kalshiSlug: "professional-football-game",   label: "NFL",  seasonMonths: [7,8,9,10,11,0,1] },
+  basketball_wnba:      { kalshi: "KXWNBAGAME", kalshiSlug: "wnba-game",                    label: "WNBA", seasonMonths: [4,5,6,7,8,9] },
+  soccer_usa_mls:       { kalshi: "KXMLSGAME",  kalshiSlug: "major-league-soccer-game",     label: "MLS",  seasonMonths: [1,2,3,4,5,6,7,8,9,10] },
 };
+
+function kalshiEventUrl(seriesTicker, seriesSlug, eventTicker) {
+  if (!seriesTicker || !seriesSlug || !eventTicker) return "https://kalshi.com/sports";
+  return `https://kalshi.com/markets/${seriesTicker.toLowerCase()}/${seriesSlug}/${eventTicker.toLowerCase()}`;
+}
 
 async function jget(url) {
   try {
@@ -227,6 +240,20 @@ export default async function handler(req, res) {
   const API_KEY = process.env.ODDS_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "ODDS_API_KEY not configured" });
 
+  // Redis cache gate — prediction markets only need to recompute every 15m
+  // (Kalshi/Polymarket/book lines drift that slowly for full-game markets).
+  // Without this every page view burned ~6 Odds API credits.
+  const redis = await getRedis().catch(() => null);
+  if (redis) {
+    try {
+      const cached = await redis.get(CACHE_KEY);
+      if (cached) {
+        res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+        return res.status(200).json(JSON.parse(cached));
+      }
+    } catch {}
+  }
+
   const month = new Date().getMonth();
   const inSeasonKeys = Object.entries(SPORT_CONFIGS)
     .filter(([, cfg]) => cfg.seasonMonths.includes(month))
@@ -300,7 +327,7 @@ export default async function handler(req, res) {
         const comp = buildComparison({
           source: "kalshi",
           marketId: m.ticker,
-          marketUrl: `https://kalshi.com/markets/${m.ticker}`,
+          marketUrl: kalshiEventUrl(cfg.kalshi, cfg.kalshiSlug, evTicker),
           title: m.title || `${game.away} @ ${game.home}`,
           sportLabel: cfg.label,
           sportKey,
@@ -388,8 +415,7 @@ export default async function handler(req, res) {
       return Math.abs(b.bestBet.edgePP) - Math.abs(a.bestBet.edgePP);
     });
 
-    res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300");
-    return res.status(200).json({
+    const payload = {
       matches,
       totalMatches: matches.length,
       counts: {
@@ -397,7 +423,14 @@ export default async function handler(req, res) {
         polymarket: matches.filter(m => m.source === "polymarket").length,
       },
       cachedAt: new Date().toISOString(),
-    });
+    };
+
+    if (redis) {
+      try { await redis.setEx(CACHE_KEY, CACHE_TTL_SECONDS, JSON.stringify(payload)); } catch {}
+    }
+
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+    return res.status(200).json(payload);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

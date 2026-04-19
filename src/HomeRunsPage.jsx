@@ -249,18 +249,6 @@ export default function HomeRunsPage() {
           >
             🎰 Recommended parlays →
           </Link>
-          <button
-            onClick={() => { setRefreshing(true); loadData(true); }}
-            disabled={refreshing}
-            style={{
-              padding: "7px 12px", borderRadius: 8,
-              border: "1px solid #1a73e8", background: "#fff", color: "#1a73e8",
-              fontSize: 12, fontWeight: 700, cursor: refreshing ? "wait" : "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
-            {refreshing ? "Refreshing…" : "↻ Refresh"}
-          </button>
         </div>
 
         {/* Summary */}
