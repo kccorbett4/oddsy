@@ -206,12 +206,17 @@ async function scrapeFanDuel() {
 // ────────────────────────────────────────────────────────────────────
 // Public entrypoint
 // ────────────────────────────────────────────────────────────────────
+// DK was dropped from the scraper on 2026-04-19 — their Nash API is
+// Akamai-blocked from Vercel's serverless IP range, and The Odds API
+// already returns DraftKings HR lines under `batter_home_runs`, so the
+// scraper was redundant when it worked and an alert source when it
+// didn't. FanDuel stays: Odds API coverage for FD HR props is spottier.
+// If DK HR coverage regresses, re-introduce via a proxy (Cloudflare
+// Worker on a residential/non-cloud ASN).
 export async function fetchScrapedHr() {
-  const [dk, fd] = await Promise.allSettled([scrapeDraftKings(), scrapeFanDuel()]);
+  const [fd] = await Promise.allSettled([scrapeFanDuel()]);
   return {
-    draftkings: dk.status === "fulfilled"
-      ? { ok: true, events: dk.value, eventCount: dk.value.length }
-      : { ok: false, error: dk.reason?.message || String(dk.reason), events: [] },
+    draftkings: { ok: true, events: [], eventCount: 0, skipped: "covered by Odds API" },
     fanduel: fd.status === "fulfilled"
       ? { ok: true, events: fd.value, eventCount: fd.value.length }
       : { ok: false, error: fd.reason?.message || String(fd.reason), events: [] },
