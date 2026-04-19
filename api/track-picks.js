@@ -4,7 +4,7 @@
 // Built-in strategies (sharp/value/stale/rlm/correlated/narrative) are shared;
 // custom_* picks are only returned to their owner (or dropped entirely for
 // anonymous requests).
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 import { getUserIdFromRequest } from "./_auth.js";
 
 function unitsOnWin(oddsStr) {
@@ -14,16 +14,13 @@ function unitsOnWin(oddsStr) {
 }
 
 export default async function handler(req, res) {
-  let client;
   try {
-    if (!process.env.REDIS_URL) {
+    const client = await getRedis();
+    if (!client) {
       return res.status(200).json({ picks: [], note: "REDIS_URL not configured" });
     }
 
     const userId = await getUserIdFromRequest(req);
-
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
 
     const picks = [];
     let scanned = 0;
@@ -91,7 +88,5 @@ export default async function handler(req, res) {
     return res.status(200).json({ picks, scanned });
   } catch (err) {
     return res.status(200).json({ picks: [], error: err.message });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

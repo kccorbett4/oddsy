@@ -2,7 +2,7 @@
 // evaluates them against the current odds feed, dedupes new matches via
 // Redis (notify_sent:<user_id>:<strategy_id>:<pickKey>, 7-day TTL), and
 // emails the user via Resend. Skips cleanly if RESEND_API_KEY is missing.
-import { createClient as createRedis } from "redis";
+import { getRedis } from "./_redis.js";
 import { createClient as createSupabase } from "@supabase/supabase-js";
 
 // Inline strategy evaluator — mirrors the one in src/StrategyBuilder.jsx.
@@ -12,6 +12,24 @@ const calcEV = (odds, p) => {
   const payout = odds > 0 ? odds / 100 : 100 / Math.abs(odds);
   return (p * payout - (1 - p)) * 100;
 };
+
+// Power-margin de-vig, mirrors src/evMath.js. Iterative k-search for
+// p1^k + p2^k = 1. Corrects favorite-longshot bias.
+function powerDevig(p1, p2) {
+  if (!Number.isFinite(p1) || !Number.isFinite(p2)) return null;
+  if (p1 <= 0 || p2 <= 0 || p1 >= 1 || p2 >= 1) return null;
+  const sum = p1 + p2;
+  if (sum <= 1.0) return { fair1: p1, fair2: p2, k: 1, vig: 0 };
+  if (sum > 1.5) return null;
+  let lo = 0.01, hi = 5, k = 1;
+  for (let i = 0; i < 40; i++) {
+    k = (lo + hi) / 2;
+    const s = Math.pow(p1, k) + Math.pow(p2, k);
+    if (Math.abs(s - 1) < 1e-9) break;
+    if (s > 1) lo = k; else hi = k;
+  }
+  return { fair1: Math.pow(p1, k), fair2: Math.pow(p2, k), k, vig: sum - 1 };
+}
 const median = (a) => {
   if (!a.length) return 0;
   const s = [...a].sort((x, y) => x - y);
@@ -117,7 +135,9 @@ function evaluateStrategy(strategy, games, contextMap = null) {
         const sum = p1 + p2;
         if (!(sum > 1.0 && sum < 1.25)) continue;
         const bookVig = sum - 1;
-        for (const [o, fair] of [[o1, p1 / sum], [o2, p2 / sum]]) {
+        const dv = powerDevig(p1, p2);
+        if (!dv) continue;
+        for (const [o, fair] of [[o1, dv.fair1], [o2, dv.fair2]]) {
           const key = `${o.name}_${o.point || ""}`;
           (perOutcomeFair[key] ||= []).push(fair);
           (perOutcomeOffers[key] ||= []).push({ ...o, book: book.title, bookVig });
@@ -274,7 +294,6 @@ async function sendEmail({ to, subject, html }) {
 }
 
 export default async function handler(req, res) {
-  let redis;
   try {
     const supaUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -296,8 +315,8 @@ export default async function handler(req, res) {
       fetchGameContext(siteUrl),
     ]);
 
-    redis = createRedis({ url: process.env.REDIS_URL });
-    await redis.connect();
+    const redis = await getRedis();
+    if (!redis) return res.status(200).json({ skipped: true, reason: "Redis unavailable" });
 
     const emailed = [];
     for (const row of active) {
@@ -331,7 +350,5 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("notify-picks error", err);
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
   }
 }

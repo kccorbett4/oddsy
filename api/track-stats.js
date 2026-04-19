@@ -3,7 +3,7 @@
 //   come from global `stats:<name>` keys.
 // - Custom strategies come from `user:<uid>:stats:custom_<id>` keys for the
 //   signed-in user (no auth → no custom stats).
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 import { getUserIdFromRequest } from "./_auth.js";
 
 function parseStats(data) {
@@ -22,9 +22,9 @@ function parseStats(data) {
 }
 
 export default async function handler(req, res) {
-  let client;
   try {
-    if (!process.env.REDIS_URL) {
+    const client = await getRedis();
+    if (!client) {
       return res.status(200).json({
         stats: {},
         pendingPicks: 0,
@@ -33,9 +33,6 @@ export default async function handler(req, res) {
     }
 
     const userId = await getUserIdFromRequest(req);
-
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
 
     const stats = {};
     const seen = new Set();
@@ -86,7 +83,5 @@ export default async function handler(req, res) {
       pendingPicks: 0,
       error: err.message,
     });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

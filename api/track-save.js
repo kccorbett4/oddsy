@@ -2,7 +2,7 @@
 // If the request carries a Supabase Bearer token, picks for `custom_*`
 // strategies get tagged with the user's id so the resolver can score them
 // into per-user Redis keys.
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 import { getUserIdFromRequest } from "./_auth.js";
 
 export default async function handler(req, res) {
@@ -10,16 +10,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "POST only" });
   }
 
-  let client;
   try {
-    if (!process.env.REDIS_URL) {
+    const client = await getRedis();
+    if (!client) {
       return res.status(200).json({ saved: 0, note: "REDIS_URL not configured" });
     }
 
     const userId = await getUserIdFromRequest(req);
-
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
 
     const { picks } = req.body;
     if (!picks || !Array.isArray(picks) || picks.length === 0) {
@@ -96,7 +93,5 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Save error:", err);
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

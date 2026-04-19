@@ -19,6 +19,24 @@
 const LEAGUE_HR_PER_PA = 0.032;
 // League-average barrel rate per PA (%). Savant publishes ~6-7%.
 const LEAGUE_BARREL_PER_PA = 6.8;
+// League-average HR rate per batter faced for pitchers (~HR/9 of 1.15).
+const LEAGUE_HR_PER_TBF = 0.030;
+
+// Bayesian prior strengths (in PA / TBF units). A prior of 300 PA means an
+// observed hrPerPA is shrunk halfway toward league mean once the player has
+// accumulated 300 PAs. This controls April noise — early samples with
+// inflated hrPerPA no longer produce wildly inflated projections.
+const PRIOR_PA_BATTER = 300;
+const PRIOR_TBF_PITCHER = 300;
+
+// Hard cap on the combined ballpark × weather environmental multiplier.
+// 3-yr Statcast park factors already absorb each park's typical wind
+// patterns, so stacking daily wind vectors on top double-counts the
+// persistent component. Capping the product at 1.35× prevents the
+// Wrigley-with-a-15mph-tailwind runaway inflation. 0.70 floor prevents
+// the Oracle-Park-in-a-cold-front case from collapsing entirely.
+const ENV_FACTOR_MAX = 1.35;
+const ENV_FACTOR_MIN = 0.70;
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
@@ -74,17 +92,38 @@ function weatherFactor(weather, park) {
 }
 
 // ——— Batter / Pitcher multipliers ———————————————————————————————————
-function batterFactor(batter, savant) {
-  // Skill baseline from season HR/PA (anchors against league rate).
-  let season = batter?.hrPerPA ? batter.hrPerPA / LEAGUE_HR_PER_PA : 1;
-  // Regress small samples toward league average.
-  const pa = batter?.pa || 0;
-  if (pa < 100) season = (season * pa + 1 * (100 - pa)) / 100;
+// Beta-binomial style shrinkage toward league mean. Takes observed HR and
+// PA and returns a posterior HR/PA rate using a prior that pretends the
+// player has already accumulated PRIOR_PA plate appearances at league rate.
+//
+// posterior = (hr + leagueRate * prior) / (pa + prior)
+//
+// When pa = 0, the posterior equals league rate. When pa >> prior, the
+// posterior converges to the observed rate. Strength=300 PA means a
+// player with 300 PAs has a posterior halfway between their raw rate
+// and league mean — still early-season noise protection.
+function shrinkRate(hr, pa, leagueRate, prior) {
+  if (!Number.isFinite(hr) || !Number.isFinite(pa)) return leagueRate;
+  return (hr + leagueRate * prior) / (pa + prior);
+}
 
-  // Savant barrels/PA is a sticky underlying signal (more predictive
-  // than raw HR/PA at mid-season). Blend when available.
+function batterFactor(batter, savant) {
+  // Bayesian posterior HR/PA → ratio vs league. Properly handles any PA,
+  // small samples automatically get regressed without the old hard 100-PA
+  // switch that produced discontinuities.
+  const hr = batter?.hr || 0;
+  const pa = batter?.pa || 0;
+  const shrunk = shrinkRate(hr, pa, LEAGUE_HR_PER_PA, PRIOR_PA_BATTER);
+  const season = shrunk / LEAGUE_HR_PER_PA;
+
+  // Savant barrels/PA is a sticky underlying signal (more predictive than
+  // raw HR/PA at mid-season). Shrink its deviation toward league mean by
+  // the same sample-size logic, then convert to a multiplier.
   let barrelFactor = 1;
   if (savant?.barrelPerPA != null) {
+    // Savant's leaderboard already uses a min-PA filter, so weight the
+    // deviation proportional to how far it is from league (no sample
+    // size field exposed — use a modest 0.6 coefficient as a damping).
     barrelFactor = 1 + 0.6 * (savant.barrelPerPA - LEAGUE_BARREL_PER_PA) / LEAGUE_BARREL_PER_PA;
     barrelFactor = clamp(barrelFactor, 0.55, 1.75);
   }
@@ -95,13 +134,14 @@ function batterFactor(batter, savant) {
 }
 
 function pitcherFactor(pitcher, savantP) {
-  let season = 1;
-  if (pitcher?.hrPer9) {
-    // League HR/9 ~ 1.15. Higher = more HR-prone.
-    season = pitcher.hrPer9 / 1.15;
-  }
+  // Pitcher HR rate regressed via batters-faced (TBF) rather than IP for
+  // cleaner stats. TBF isn't always populated in the stats payload so we
+  // fall back to estimating TBF ≈ IP × 4.3 when needed.
+  const hrAllowed = pitcher?.hr || 0;
   const ip = pitcher?.ip || 0;
-  if (ip < 40) season = (season * ip + 1 * (40 - ip)) / 40;
+  const tbf = (pitcher?.tbf && Number.isFinite(pitcher.tbf) ? pitcher.tbf : ip * 4.3) || 0;
+  const shrunk = shrinkRate(hrAllowed, tbf, LEAGUE_HR_PER_TBF, PRIOR_TBF_PITCHER);
+  const season = shrunk / LEAGUE_HR_PER_TBF;
 
   let barrelAllowed = 1;
   if (savantP?.barrelPerPA != null) {
@@ -134,11 +174,27 @@ function platoonFactor(batterSplit, pitcherSplit, batterSeasonHrPerPA) {
 }
 
 // ——— PA expectation ————————————————————————————————————————————————
+// Base PAs by lineup slot (league-average over all games).
 const PA_BY_LINEUP = {
   1: 4.65, 2: 4.55, 3: 4.45, 4: 4.35, 5: 4.25,
   6: 4.15, 7: 4.05, 8: 3.95, 9: 3.80,
 };
 const DEFAULT_PA = 4.20;
+
+// Away teams are guaranteed to hit in the top of the 9th regardless of
+// score; home teams skip the bottom of the 9th when leading. Net empirical
+// edge is ~0.3 PAs per game for the away lineup. Applied as a per-lineup
+// scalar so the lineup-slot relationship is preserved.
+const AWAY_PA_BUMP = 0.07;   // ~1.6% lift per lineup slot
+const HOME_PA_BUMP = 0.00;
+
+function expectedPA(lineupOrder, teamSide) {
+  const base = lineupOrder ? (PA_BY_LINEUP[lineupOrder] ?? DEFAULT_PA) : DEFAULT_PA;
+  const bump = teamSide === "away" ? AWAY_PA_BUMP
+             : teamSide === "home" ? HOME_PA_BUMP
+             : 0;
+  return base + bump;
+}
 
 // ——— Odds math ————————————————————————————————————————————————————————
 export const americanToDecimal = (a) => {
@@ -324,26 +380,65 @@ export function rankHrProjections(ctx, odds) {
 
     const park = game.park;
     const weather = game.weather;
-    const wFactor = weatherFactor(weather, park);
-    const parkF = park?.hrFactor ?? 1;
+    const wFactorRaw = weatherFactor(weather, park);
+    const parkFRaw = park?.hrFactor ?? 1;
+    // Cap the combined environmental multiplier. Park factors already
+    // encode each park's typical wind climate, so stacking daily wind on
+    // top of the full park factor double-counts the persistent component
+    // in gusty stadiums. Clamping the product to [0.70, 1.35] preserves
+    // real directional signal without compounding to absurdity.
+    const envRaw = parkFRaw * wFactorRaw;
+    const envFactor = clamp(envRaw, ENV_FACTOR_MIN, ENV_FACTOR_MAX);
+    // Exposed individually for UI explainability — but the product used
+    // downstream is the clamped one.
+    const parkF = parkFRaw;
+    const wFactor = wFactorRaw;
 
     const homePitcher = game.probablePitchers?.home;
     const awayPitcher = game.probablePitchers?.away;
 
     for (const player of (ev.players || [])) {
-      const bInfo = findBatterByName(batters, player.name);
-      if (!bInfo) continue; // player not in season stats yet
-      const batter = bInfo.batter;
-      const batterId = bInfo.id;
-
-      // Determine which lineup this player is on (by scanning both lineups).
-      let teamSide = null;
-      let lineupOrder = null;
+      // Resolve player to team first. When lineups are posted (confirmed),
+      // they are the authoritative source: a match in exactly one lineup
+      // gives us the player's MLB ID *and* team side with zero ambiguity.
+      // Two matches across both lineups (e.g., both teams carry a
+      // "Luis Garcia") is ambiguous → skip rather than guess. Zero lineup
+      // matches + posted lineups means the player isn't starting today →
+      // skip. Unposted lineups fall through to the global name search.
+      const lineupHits = [];
       for (const [side, list] of [["home", game.lineups.home], ["away", game.lineups.away]]) {
-        const slot = list.find(l => namesMatch(l.name, player.name));
-        if (slot) { teamSide = side; lineupOrder = slot.order; break; }
+        for (const slot of (list || [])) {
+          if (namesMatch(slot.name, player.name)) lineupHits.push({ side, slot });
+        }
       }
-      // Fallback — if lineup isn't posted, infer team via stats if we can.
+
+      let batter = null, batterId = null, teamSide = null, lineupOrder = null;
+      if (lineupHits.length === 1) {
+        const { side, slot } = lineupHits[0];
+        teamSide = side;
+        lineupOrder = slot.order;
+        batterId = slot.playerId;
+        batter = batters[batterId] || batters[String(batterId)] || null;
+        // Edge case: lineup includes someone not in the season-stats map
+        // (e.g. a call-up with no MLB PAs yet). Bayesian regression works
+        // fine on {hr:0, pa:0}, so synthesize a minimal record.
+        if (!batter) batter = { name: slot.name, hr: 0, pa: 0, hrPerPA: 0 };
+      } else if (lineupHits.length > 1) {
+        // Ambiguous — same name on both lineups. Skip to avoid misattribution.
+        continue;
+      } else if (game.lineupsConfirmed) {
+        // Lineups are posted and this name isn't in either — not starting.
+        continue;
+      } else {
+        // Lineups not posted → fall back to a global name match. This is
+        // still loose (could cross-match a league-wide same-name player)
+        // but we can't do better until lineups are announced.
+        const bInfo = findBatterByName(batters, player.name);
+        if (!bInfo) continue;
+        batter = bInfo.batter;
+        batterId = bInfo.id;
+      }
+
       const opposingPitcher = teamSide === "home" ? awayPitcher : teamSide === "away" ? homePitcher : null;
 
       const savantB = findSavant(savantBatters, batterId);
@@ -358,9 +453,9 @@ export function rankHrProjections(ctx, odds) {
       const pSplit = opposingPitcher ? pitcherSplits[opposingPitcher.playerId] : null;
       const platoonF = platoonFactor(bSplit, pSplit, batter.hrPerPA);
 
-      const perPA = LEAGUE_HR_PER_PA * bFactor * pFactor * parkF * wFactor * platoonF;
-      const expectedPA = lineupOrder ? (PA_BY_LINEUP[lineupOrder] ?? DEFAULT_PA) : DEFAULT_PA;
-      const modelProb = 1 - Math.pow(1 - perPA, expectedPA);
+      const perPA = LEAGUE_HR_PER_PA * bFactor * pFactor * envFactor * platoonF;
+      const pa = expectedPA(lineupOrder, teamSide);
+      const modelProb = 1 - Math.pow(1 - perPA, pa);
 
       // Best book price.
       let bestBook = null, bestDec = null, bestAm = null;
@@ -404,9 +499,11 @@ export function rankHrProjections(ctx, odds) {
           pitcherFactor: +pFactor.toFixed(3),
           parkFactor: parkF,
           weatherFactor: +wFactor.toFixed(3),
+          envFactor: +envFactor.toFixed(3),
+          envClamped: envRaw !== envFactor,
           platoonFactor: +platoonF.toFixed(3),
           perPA: +perPA.toFixed(4),
-          expectedPA,
+          expectedPA: +pa.toFixed(3),
         },
         weather: weather || null,
         savantB: savantB || null,

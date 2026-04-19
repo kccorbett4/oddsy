@@ -7,9 +7,9 @@
 //   /api/hr?action=bvp&batter=X&pitcher=Y — career BvP history
 //
 // Each sub-handler caches independently in Redis with its own TTL.
-import { createClient } from "redis";
 import { parkFor } from "./_hr_parks.js";
 import { fetchScrapedHr, mergeScrapedIntoEvents } from "./_hr_scrape.js";
+import { getRedis } from "./_redis.js";
 
 // ──────────────────────── shared helpers ────────────────────────
 async function jsonFetch(url) {
@@ -31,17 +31,6 @@ const americanToDecimal = (a) => {
   if (!Number.isFinite(a)) return null;
   return a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
 };
-
-async function getRedis() {
-  if (!process.env.REDIS_URL) return null;
-  try {
-    const redis = createClient({ url: process.env.REDIS_URL });
-    await redis.connect();
-    return redis;
-  } catch {
-    return null;
-  }
-}
 
 // ──────────────────────── context handler ────────────────────────
 const CTX_KEY = "hrctx:v2";
@@ -105,10 +94,11 @@ async function fetchPitcherSeasonStats(season) {
     if (!p?.id || !st) continue;
     const hr = parseInt(st.homeRuns || "0");
     const ip = parseFloat(st.inningsPitched || "0");
+    const tbf = parseInt(st.battersFaced || "0");
     const hrPer9 = ip > 0 ? (hr / ip) * 9 : 0;
     map[p.id] = {
       name: p.fullName || `${p.firstName || ""} ${p.lastName || ""}`.trim(),
-      hr, ip,
+      hr, ip, tbf,
       hrPer9: +hrPer9.toFixed(3),
       era: parseFloat(st.era || "0"),
       whip: parseFloat(st.whip || "0"),
@@ -246,13 +236,19 @@ function parseSavantCsv(csv, kind) {
   }
   return out;
 }
+// Savant's leaderboard hides any player below a PA floor. The old 50 cutoff
+// wiped out most of the league in April when even established starters
+// have <50 PAs. 25 matches early-season conditions while still excluding
+// position players who haven't really batted yet.
+const SAVANT_MIN_PA = 25;
+
 async function fetchSavantBatters(season) {
-  const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=batter&filter=&min=50`
+  const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=batter&filter=&min=${SAVANT_MIN_PA}`
     + `&selections=b_total_pa,barrels_per_pa_percent,barrel_batted_rate,xiso,xslg,hard_hit_percent,exit_velocity_avg,launch_angle_avg&csv=true`;
   return parseSavantCsv(await textFetch(url), "batter");
 }
 async function fetchSavantPitchers(season) {
-  const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=pitcher&filter=&min=50`
+  const url = `https://baseballsavant.mlb.com/leaderboard/custom?year=${season}&type=pitcher&filter=&min=${SAVANT_MIN_PA}`
     + `&selections=p_total_pa,barrels_per_pa_percent,barrel_batted_rate,xiso,xslg,hard_hit_percent,exit_velocity_avg,launch_angle_avg&csv=true`;
   return parseSavantCsv(await textFetch(url), "pitcher");
 }
@@ -422,8 +418,8 @@ async function handleContext(req, res) {
 
     res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=900");
     return res.status(200).json(payload);
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
 
@@ -550,12 +546,13 @@ async function handleOdds(req, res) {
       }
     }
 
-    let dkAttached = 0, fdAttached = 0;
+    let dkResult = { attached: 0, skippedAmbiguous: 0 };
+    let fdResult = { attached: 0, skippedAmbiguous: 0 };
     if (scraped?.draftkings?.ok) {
-      dkAttached = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
+      dkResult = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
     }
     if (scraped?.fanduel?.ok) {
-      fdAttached = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
+      fdResult = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
     }
 
     const payload = {
@@ -565,10 +562,10 @@ async function handleOdds(req, res) {
       events,
       scrapers: {
         draftkings: scraped?.draftkings?.ok
-          ? { ok: true, eventCount: scraped.draftkings.eventCount, attached: dkAttached }
+          ? { ok: true, eventCount: scraped.draftkings.eventCount, ...dkResult }
           : { ok: false, error: scraped?.draftkings?.error || "unknown", attached: 0 },
         fanduel: scraped?.fanduel?.ok
-          ? { ok: true, eventCount: scraped.fanduel.eventCount, attached: fdAttached }
+          ? { ok: true, eventCount: scraped.fanduel.eventCount, ...fdResult }
           : { ok: false, error: scraped?.fanduel?.error || "unknown", attached: 0 },
       },
     };
@@ -579,8 +576,8 @@ async function handleOdds(req, res) {
 
     res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=1800");
     return res.status(200).json(payload);
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
 
@@ -642,8 +639,8 @@ async function handleBvp(req, res) {
 
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
     return res.status(200).json(payload);
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
 
@@ -765,8 +762,6 @@ async function handleHealthcheck(req, res) {
     return res.status(200).json({ ok: true, status, alerts, checkedAt: new Date().toISOString() });
   } catch (err) {
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
   }
 }
 

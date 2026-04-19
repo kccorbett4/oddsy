@@ -8,7 +8,7 @@
 // old key format silently overwrote Game 1's context with Game 2's).
 // The StrategyBuilder merges this map into the /api/odds feed using the
 // same sport+team keys.
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 import { venueFor } from "./_venues.js";
 
 const SPORT_MAP = {
@@ -116,13 +116,11 @@ function recordFor(competitor, type) {
 }
 
 export default async function handler(req, res) {
-  let redis;
   const force = req.query?.force === "1";
   try {
-    if (process.env.REDIS_URL) {
+    const redis = await getRedis();
+    if (redis) {
       try {
-        redis = createClient({ url: process.env.REDIS_URL });
-        await redis.connect();
         if (!force) {
           const cached = await redis.get(CACHE_KEY);
           if (cached) {
@@ -278,7 +276,5 @@ export default async function handler(req, res) {
     return res.status(200).json(payload);
   } catch (err) {
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (redis) await redis.disconnect().catch(() => {});
   }
 }

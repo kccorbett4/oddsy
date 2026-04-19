@@ -1,6 +1,6 @@
 // One-shot: rebuild stats:{strategy} hashes from source-of-truth pick:* records.
 // Safe to run repeatedly — it recomputes totals from scratch each time.
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 
 function unitsOnWin(oddsStr) {
   const odds = parseFloat(oddsStr);
@@ -9,14 +9,11 @@ function unitsOnWin(oddsStr) {
 }
 
 export default async function handler(req, res) {
-  let client;
   try {
-    if (!process.env.REDIS_URL) {
+    const client = await getRedis();
+    if (!client) {
       return res.status(200).json({ scanned: 0, resolved: 0, stats: {}, note: "REDIS_URL not configured" });
     }
-
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
 
     const agg = {};
     const rawCounts = {}; // { strategy: { pending, resolved, expired, other } }
@@ -90,7 +87,5 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Rebuild error:", err);
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

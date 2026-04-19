@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "./lib/AuthContext.jsx";
 import AuthModal from "./lib/AuthModal.jsx";
 import { fetchStrategies, saveStrategy, deleteStrategy } from "./lib/strategies.js";
+import { powerDevig } from "./evMath.js";
 
 const SPORTS = [
   { id: "americanfootball_nfl", name: "NFL", icon: "🏈" },
@@ -262,7 +263,9 @@ export function evaluateStrategy(strategy, games, contextMap = null) {
     }
 
     strategy.markets.forEach(marketType => {
-      // Two-way vig removal per book, then median fair prob across books.
+      // Two-way vig removal per book (power-margin / Shin method), then
+      // median fair prob across books. Power-margin corrects for the
+      // favorite-longshot bias that the simpler p / sum approach misses.
       const perOutcomeFair = {};
       const perOutcomeOffers = {};
       (game.bookmakers || []).forEach(book => {
@@ -274,7 +277,9 @@ export function evaluateStrategy(strategy, games, contextMap = null) {
         const sum = p1 + p2;
         if (!(sum > 1.0 && sum < 1.25)) return;
         const bookVig = sum - 1;
-        [[o1, p1 / sum], [o2, p2 / sum]].forEach(([o, fair]) => {
+        const dv = powerDevig(p1, p2);
+        if (!dv) return;
+        [[o1, dv.fair1], [o2, dv.fair2]].forEach(([o, fair]) => {
           const key = `${o.name}_${o.point || ""}`;
           if (!perOutcomeFair[key]) perOutcomeFair[key] = [];
           if (!perOutcomeOffers[key]) perOutcomeOffers[key] = [];

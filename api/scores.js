@@ -8,7 +8,7 @@
 //
 // Reads from Redis merge with the live fetch so callers always get recent
 // finals even if ESPN's scoreboard no longer returns them.
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 
 const SPORT_MAP = {
   basketball_nba: "basketball/nba",
@@ -157,16 +157,9 @@ async function loadRecentFinalsFromRedis(client, days = 2) {
 }
 
 export default async function handler(req, res) {
-  let client;
   try {
-    if (process.env.REDIS_URL) {
-      try {
-        client = createClient({ url: process.env.REDIS_URL });
-        await client.connect();
-      } catch {
-        client = null;
-      }
-    }
+    let client = null;
+    try { client = await getRedis(); } catch { client = null; }
 
     // Fetch today + yesterday for every sport so narrative regression
     // (which needs last-night blowouts) has data to work with.
@@ -201,7 +194,5 @@ export default async function handler(req, res) {
     return res.status(200).json({ events: allEvents, stored });
   } catch (err) {
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

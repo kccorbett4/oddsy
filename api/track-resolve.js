@@ -1,6 +1,6 @@
 // Cron job: checks finished games and resolves pending picks.
 // Runs daily at 6 AM UTC via Vercel Cron.
-import { createClient } from "redis";
+import { getRedis } from "./_redis.js";
 import { statsKey } from "./_auth.js";
 
 // 1-unit flat stake. Win profit = decimal odds - 1. Loss = -1. Push = 0.
@@ -65,14 +65,11 @@ const outcomeIsHome = (outcomeName, homeTeam, awayTeam) => {
 };
 
 export default async function handler(req, res) {
-  let client;
   try {
-    if (!process.env.REDIS_URL) {
+    const client = await getRedis();
+    if (!client) {
       return res.status(200).json({ resolved: 0, note: "REDIS_URL not configured" });
     }
-
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
 
     const now = Date.now();
     // Get all pending picks where the game should have started by now
@@ -239,7 +236,5 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Resolve error:", err);
     return res.status(500).json({ error: err.message });
-  } finally {
-    if (client) await client.disconnect().catch(() => {});
   }
 }

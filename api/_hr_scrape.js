@@ -214,6 +214,12 @@ export async function fetchScrapedHr() {
 // We match scraped events to the main feed by normalized team names
 // (home/away either order). When a player already has entries from
 // other books, we append — when they don't, we add them as a new player.
+//
+// Collision guard: if the main event already has ≥2 players sharing the
+// same normalized name (two "Luis Garcia"s on opposite sides of the same
+// game), the scraped prop is ambiguous since the scraper doesn't emit
+// team info per player. We skip those rather than risk crediting the
+// wrong person's HR line.
 export function mergeScrapedIntoEvents(events, scraped, bookName) {
   const normTeam = (s) => (s || "")
     .toLowerCase().replace(/\./g, "")
@@ -222,7 +228,7 @@ export function mergeScrapedIntoEvents(events, scraped, bookName) {
     .toLowerCase().replace(/[.'`]/g, "")
     .replace(/\s+/g, " ").trim();
 
-  let attached = 0;
+  let attached = 0, skippedAmbiguous = 0;
   for (const scEv of (scraped.events || [])) {
     const h = normTeam(scEv.home);
     const a = normTeam(scEv.away);
@@ -233,10 +239,26 @@ export function mergeScrapedIntoEvents(events, scraped, bookName) {
     );
     if (!target) continue;
 
+    // Precompute name→candidate-count on the target so we can detect
+    // ambiguities without rescanning the whole players array per merge.
+    const nameCounts = {};
+    for (const p of target.players) {
+      const k = playerKey(p.name);
+      nameCounts[k] = (nameCounts[k] || 0) + 1;
+    }
+
     for (const scP of scEv.players) {
       const priceRow = scP.books[0];
       if (!priceRow) continue;
-      const existing = target.players.find(p => playerKey(p.name) === playerKey(scP.name));
+      const k = playerKey(scP.name);
+      if (nameCounts[k] > 1) {
+        // Two players with the same normalized name already present in
+        // this event's player list. We can't disambiguate without team
+        // info on the scraped side.
+        skippedAmbiguous++;
+        continue;
+      }
+      const existing = target.players.find(p => playerKey(p.name) === k);
       if (existing) {
         if (!existing.books.some(b => b.book === bookName)) {
           existing.books.push(priceRow);
@@ -244,9 +266,10 @@ export function mergeScrapedIntoEvents(events, scraped, bookName) {
         }
       } else {
         target.players.push({ name: scP.name, books: [priceRow] });
+        nameCounts[k] = (nameCounts[k] || 0) + 1;
         attached++;
       }
     }
   }
-  return attached;
+  return { attached, skippedAmbiguous };
 }
