@@ -45,6 +45,12 @@ const BOOK_URLS = {
 // combined so a rare extreme leg doesn't produce runaway payouts the way
 // a single-pick edge would.
 const EXTREME_ODDS = 1500;
+
+const parlayFilterBtn = {
+  padding: "4px 10px", borderRadius: 6, border: "1px solid #d5d8de",
+  background: "#fff", fontSize: 11, color: "#4a5568", cursor: "pointer",
+  fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+};
 const isExtremeOdds = (price) => Math.abs(price) > EXTREME_ODDS;
 
 // Calculate implied probability from American odds
@@ -938,6 +944,23 @@ const BookLink = ({ book, style, prefix = "", suffix = "" }) => {
 // we can pull offers across every bookmaker.
 const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  // Dismiss on tap/click outside. Mouseleave isn't enough on touch devices
+  // — once the popover opens on tap there's no "leave" event to close it.
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("touchstart", onDocDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("touchstart", onDocDown);
+    };
+  }, [open]);
+
   if (!game || !marketType || !outcome) return null;
   const { perOutcomeOffers } = collectMarketFairProbs(game, marketType);
   const pointStr = point === null || point === undefined ? "" : `${point}`;
@@ -947,25 +970,31 @@ const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
   const toggle = (e) => { e.stopPropagation(); e.preventDefault(); setOpen(v => !v); };
   return (
     <span
+      ref={wrapRef}
       style={{ position: "relative", display: "inline-block", marginLeft: 4, verticalAlign: "middle" }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
     >
-      <span
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         onClick={toggle}
         aria-label="Show all books"
+        aria-expanded={open}
         style={{
+          // 28x28 transparent hit target with a 13px visual dot — mobile
+          // needs ≥24px tappable area per Apple/Google guidelines.
           display: "inline-flex", alignItems: "center", justifyContent: "center",
-          width: 13, height: 13, borderRadius: "50%",
-          border: "1px solid #cbd5e0", background: "#fff",
-          fontSize: 9, fontWeight: 800, color: "#6b7280",
-          cursor: "help", fontStyle: "italic", lineHeight: 1,
+          width: 28, height: 28, padding: 0, margin: -8,
+          background: "transparent", border: "none",
+          cursor: "pointer", verticalAlign: "middle",
         }}
       >
-        i
-      </span>
+        <span style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 14, height: 14, borderRadius: "50%",
+          border: "1px solid #cbd5e0", background: open ? "#1a73e8" : "#fff",
+          fontSize: 9, fontWeight: 800, color: open ? "#fff" : "#6b7280",
+          fontStyle: "italic", lineHeight: 1, pointerEvents: "none",
+        }}>i</span>
+      </button>
       {open && (
         <div
           onClick={(e) => e.stopPropagation()}
@@ -975,7 +1004,7 @@ const AllBooksTooltip = ({ game, marketType, outcome, point, bestBook }) => {
             background: "#fff", border: "1px solid #e2e5ea",
             borderRadius: 8, padding: "8px 10px",
             boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-            minWidth: 150, whiteSpace: "nowrap",
+            minWidth: 150, maxWidth: "80vw", whiteSpace: "nowrap",
             textAlign: "left",
           }}
         >
@@ -1522,6 +1551,8 @@ export default function App() {
   const [parlays, setParlays] = useState([]);
   const [parlayKey, setParlayKey] = useState(0);
   const [wagerAmount, setWagerAmount] = useState(25);
+  // null = all books included. User flips to explicit Set once they toggle.
+  const [parlayEnabledBooks, setParlayEnabledBooks] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState("loading");
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
@@ -2856,8 +2887,59 @@ export default function App() {
               </div>
             </div>
 
+            {/* Book filter */}
+            {(() => {
+              const allBooks = [...new Set(parlays.map(p => p.book).filter(Boolean))].sort();
+              if (allBooks.length === 0) return null;
+              const enabled = parlayEnabledBooks;
+              const isActive = (book) => enabled ? enabled.has(book) : true;
+              const toggle = (book) => setParlayEnabledBooks(prev => {
+                const base = prev ? new Set(prev) : new Set(allBooks);
+                if (base.has(book)) base.delete(book); else base.add(book);
+                return base;
+              });
+              return (
+                <div style={{
+                  background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
+                  padding: "10px 14px", marginBottom: 14,
+                }}>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    marginBottom: 8, flexWrap: "wrap", gap: 6,
+                  }}>
+                    <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 700 }}>
+                      Sportsbooks
+                      <span style={{ fontWeight: 500, color: "#9ca3af", marginLeft: 6 }}>
+                        ({enabled ? enabled.size : allBooks.length} of {allBooks.length})
+                      </span>
+                    </span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setParlayEnabledBooks(null)} style={parlayFilterBtn}>All</button>
+                      <button onClick={() => setParlayEnabledBooks(new Set())} style={parlayFilterBtn}>Clear</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {allBooks.map(book => {
+                      const active = isActive(book);
+                      return (
+                        <button key={book} onClick={() => toggle(book)} style={{
+                          padding: "5px 11px", borderRadius: 999, fontSize: 12, cursor: "pointer",
+                          border: active ? "1px solid #7c3aed" : "1px solid #d5d8de",
+                          background: active ? "#f3edff" : "#fff",
+                          color: active ? "#5b21b6" : "#6b7280",
+                          fontWeight: active ? 700 : 500, fontFamily: "'DM Sans', sans-serif",
+                        }}>{book}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {parlays.map((parlay, pi) => (
+              {parlays
+                .filter(p => !parlayEnabledBooks || parlayEnabledBooks.has(p.book))
+                .map((parlay, pi) => (
                 <div key={`${parlay.strategy}-${pi}-${parlayKey}`} style={{
                   background: "#fff",
                   border: "1px solid #e2e5ea",
