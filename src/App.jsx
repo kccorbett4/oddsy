@@ -827,9 +827,9 @@ const StatCard = ({ label, value, sub, color }) => (
 
 const SAMPLE_THRESHOLD = 1;
 
-// Click-to-reveal tooltip that explains what units mean and translates
-// the current unit total into concrete dollar amounts at common bet sizes.
-// Works on both desktop (hover) and mobile (tap).
+// Click-to-reveal modal that explains units and translates the current
+// total into concrete dollar amounts at common bet sizes. Rendered as a
+// centered overlay so it never clips off the edge of the screen.
 const UnitsInfo = ({ units, dark = false }) => {
   const [open, setOpen] = useState(false);
   const u = typeof units === "number" ? units : parseFloat(units || 0);
@@ -840,62 +840,88 @@ const UnitsInfo = ({ units, dark = false }) => {
   };
   const sign = u >= 0 ? "+" : "-";
   const abs = Math.abs(u);
+  const direction = u >= 0 ? "up" : "down";
+  const profitColor = u >= 0 ? "#0d9f4f" : "#dc2626";
   const iconColor = dark ? "#a0aec0" : "#8b919a";
-  const bg = dark ? "#fff" : "#fff";
-  const fg = "#1a1d23";
 
   return (
-    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+    <>
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
         aria-label="What does 'u' mean?"
         style={{
-          width: 18, height: 18, borderRadius: "50%",
+          width: 20, height: 20, borderRadius: "50%",
           border: `1px solid ${iconColor}`, background: "transparent",
-          color: iconColor, fontSize: 11, fontWeight: 800,
+          color: iconColor, fontSize: 12, fontWeight: 800,
           display: "inline-flex", alignItems: "center", justifyContent: "center",
-          cursor: "pointer", marginLeft: 6, padding: 0, lineHeight: 1,
-          fontFamily: "'DM Sans', sans-serif",
+          cursor: "pointer", marginLeft: 8, padding: 0, lineHeight: 1,
+          fontFamily: "'DM Sans', sans-serif", flexShrink: 0,
         }}
       >i</button>
       {open && (
         <div
-          onClick={(e) => e.stopPropagation()}
+          onClick={() => setOpen(false)}
           style={{
-            position: "absolute", top: "calc(100% + 6px)", right: 0,
-            background: bg, color: fg,
-            border: "1px solid #e2e5ea", borderRadius: 10,
-            padding: "14px 16px", width: 280, zIndex: 50,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-            fontFamily: "'DM Sans', sans-serif", textAlign: "left",
-            fontWeight: 400,
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(4px)", zIndex: 2000,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
           }}
         >
-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, color: fg }}>What does "u" mean?</div>
-          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.55, marginBottom: 10 }}>
-            "u" stands for <strong>unit</strong>. A unit is just <strong>one bet</strong> — whatever size you'd pick.
-            If every bet you made was $10, then <strong>1u = $10</strong>. If every bet was $100, then <strong>1u = $100</strong>.
-          </div>
-          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.55, marginBottom: 10 }}>
-            So <strong>{sign}{abs.toFixed(2)}u</strong> means: if you'd bet the same amount on every single pick, you'd be {u >= 0 ? "up" : "down"} that many bets' worth of money.
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: fg, marginBottom: 6 }}>
-            Here's what that looks like in real money:
-          </div>
-          <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.8 }}>
-            <div>Bet $10 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 10)}</strong></div>
-            <div>Bet $100 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 100)}</strong></div>
-            <div>Bet $1,000 each time &nbsp;→ &nbsp;<strong style={{ color: u >= 0 ? "#0d9f4f" : "#dc2626" }}>{sign}${fmt(abs * 1000)}</strong></div>
-          </div>
-          <div style={{ fontSize: 10, color: "#8b919a", lineHeight: 1.5, marginTop: 10, paddingTop: 8, borderTop: "1px solid #f0f1f3" }}>
-            Tiny math note: a win on a big underdog pays more than a win on a favorite. Units already do that math for you.
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff", color: "#1a1d23",
+              borderRadius: 14, padding: "20px 22px",
+              width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+              fontFamily: "'DM Sans', sans-serif", textAlign: "left",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>What is a "unit"?</div>
+              <button
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+                style={{
+                  background: "none", border: "none", fontSize: 22, color: "#8b919a",
+                  cursor: "pointer", padding: 0, lineHeight: 1, fontFamily: "inherit",
+                }}
+              >×</button>
+            </div>
+
+            <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.6, marginBottom: 14 }}>
+              A <strong>unit</strong> is just the amount of money you bet on each pick. <strong>You decide what it is.</strong>
+            </div>
+
+            <div style={{ background: "#f5f6f8", borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#1a1d23", lineHeight: 1.6 }}>
+              If you bet <strong>$10</strong> per pick → your unit is $10.<br />
+              If you bet <strong>$50</strong> per pick → your unit is $50.<br />
+              If you bet <strong>$100</strong> per pick → your unit is $100.
+            </div>
+
+            <div style={{ fontSize: 13, color: "#4a5568", lineHeight: 1.6, marginBottom: 14 }}>
+              This strategy is <strong>{direction} {abs.toFixed(2)} units</strong>. That means if you'd placed the same bet on every pick, your profit is <strong>{abs.toFixed(2)} × your bet size</strong>.
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+              What that means in dollars
+            </div>
+            <div style={{ fontSize: 13, color: "#1a1d23", lineHeight: 1.9, marginBottom: 14 }}>
+              <div>Bet $10/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 10)}</strong></div>
+              <div>Bet $50/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 50)}</strong></div>
+              <div>Bet $100/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 100)}</strong></div>
+              <div>Bet $1,000/pick &nbsp;→&nbsp; <strong style={{ color: profitColor }}>{sign}${fmt(abs * 1000)}</strong></div>
+            </div>
+
+            <div style={{ fontSize: 11, color: "#8b919a", lineHeight: 1.55, paddingTop: 10, borderTop: "1px solid #f0f1f3" }}>
+              Units let you compare strategies without knowing anyone's bet size. A win on a +200 underdog counts as +2u; a win on a −150 favorite counts as +0.67u. Bigger payouts, bigger units.
+            </div>
           </div>
         </div>
       )}
-    </span>
+    </>
   );
 };
 
