@@ -779,6 +779,35 @@ async function handleHealthcheck(req, res) {
   }
 }
 
+// ──────────────────────── debug (parlay-api discovery) ────────────────────────
+async function handleDebugMarketKeys(req, res) {
+  const API_KEY = oddsApiKey();
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+  const url = `https://parlay-api.com/v1/sports/baseball_mlb/props/markets?apiKey=${API_KEY}`;
+  const r = await fetch(url);
+  const body = await r.text();
+  try { return res.status(r.status).json({ status: r.status, body: JSON.parse(body) }); }
+  catch { return res.status(r.status).json({ status: r.status, body }); }
+}
+
+async function handleDebugPropsRaw(req, res) {
+  const API_KEY = oddsApiKey();
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+  const market = req.query?.market || "player_home_runs";
+  const url = `https://parlay-api.com/v1/sports/baseball_mlb/props`
+    + `?apiKey=${API_KEY}&markets=${market}&oddsFormat=american&limit=20`;
+  const r = await fetch(url);
+  const remaining = r.headers.get("x-requests-remaining");
+  const used = r.headers.get("x-requests-used");
+  const body = await r.text();
+  try {
+    const data = JSON.parse(body);
+    return res.status(r.status).json({ status: r.status, creditsRemaining: remaining, creditsUsed: used, body: data });
+  } catch {
+    return res.status(r.status).json({ status: r.status, creditsRemaining: remaining, creditsUsed: used, body });
+  }
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -788,6 +817,8 @@ export default async function handler(req, res) {
     if (action === "bvp") return await handleBvp(req, res);
     if (action === "coverage") return await handleCoverage(req, res);
     if (action === "healthcheck") return await handleHealthcheck(req, res);
+    if (action === "debug_market_keys") return await handleDebugMarketKeys(req, res);
+    if (action === "debug_props_raw") return await handleDebugPropsRaw(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
