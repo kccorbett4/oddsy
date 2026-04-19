@@ -150,6 +150,89 @@ const getGameStatus = (game, liveScores) => {
   return "upcoming";
 };
 
+// ── Parlay leg analysis ──────────────────────────────────
+// Given a game + market + outcome, return the leg's best price, book,
+// and vig-free fair probability (median across books that price it).
+// Returns null if the outcome can't be found or priced.
+const analyzeLeg = (game, marketType, outcomeName, point) => {
+  if (!game) return null;
+  const { perOutcomeFair, perOutcomeOffers } = collectMarketFairProbs(game, marketType);
+  const pointStr = point === null || point === undefined ? "" : `${point}`;
+  // Try exact match first (name + point), then name-only for h2h
+  const tryKeys = [
+    `${outcomeName}_${pointStr}`,
+    `${outcomeName}_`,
+  ];
+  let fair = null;
+  let offers = null;
+  for (const k of tryKeys) {
+    if (perOutcomeFair[k] && perOutcomeFair[k].length > 0) {
+      fair = perOutcomeFair[k];
+      offers = perOutcomeOffers[k];
+      break;
+    }
+  }
+  if (!fair) return null;
+  const fairProb = median(fair);
+  // Best price for the bettor: highest American odds
+  const best = offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
+  return {
+    fairProb,
+    bestOdds: best.price,
+    bestBook: best.book,
+    bookCount: offers.length,
+    point: best.point ?? point ?? null,
+  };
+};
+
+// Analyze a full parlay: combined odds, true probability (assumes
+// independence), EV, implied prob from odds, and a qualitative verdict.
+// Warns when legs share a game (correlation invalidates the independence
+// assumption and the real EV skews lower).
+const analyzeParlay = (legs) => {
+  if (!legs || legs.length < 2) return null;
+  let combinedDecimal = 1;
+  let fairProbProduct = 1;
+  legs.forEach(l => {
+    const d = l.odds > 0 ? l.odds / 100 + 1 : 100 / Math.abs(l.odds) + 1;
+    combinedDecimal *= d;
+    fairProbProduct *= l.fairProb;
+  });
+  const combinedAmerican = combinedDecimal >= 2
+    ? Math.round((combinedDecimal - 1) * 100)
+    : Math.round(-100 / (combinedDecimal - 1));
+  const impliedProb = 1 / combinedDecimal; // what the parlay price implies
+  const ev = (fairProbProduct * (combinedDecimal - 1) - (1 - fairProbProduct)) * 100;
+  const sameGameSet = new Set(legs.map(l => l.gameId));
+  const hasSameGame = sameGameSet.size < legs.length;
+  let verdict, verdictColor, verdictDetail;
+  if (ev >= 5) {
+    verdict = "Strong +EV"; verdictColor = "#0d9f4f";
+    verdictDetail = "The market consensus suggests this parlay pays more than it should. Real edge.";
+  } else if (ev >= 0) {
+    verdict = "Slight edge"; verdictColor = "#1a73e8";
+    verdictDetail = "Marginally profitable by the vig-free market. Edge is thin — watch for line movement.";
+  } else if (ev >= -5) {
+    verdict = "Near break-even"; verdictColor = "#e8a100";
+    verdictDetail = "Typical casual parlay — you're paying modest juice, not a disaster.";
+  } else {
+    verdict = "Poor value"; verdictColor = "#dc2626";
+    verdictDetail = "The book is charging significantly more than the fair price. Avoid.";
+  }
+  return {
+    legCount: legs.length,
+    combinedDecimal,
+    combinedAmerican,
+    impliedProb,
+    fairProb: fairProbProduct,
+    ev,
+    hasSameGame,
+    verdict,
+    verdictColor,
+    verdictDetail,
+  };
+};
+
 // Find value bets by comparing across books, using live scores to filter
 const findValueBets = (games, liveScores) => {
   const valueBets = [];
@@ -1302,7 +1385,8 @@ export default function App() {
     : "odds";
   const setGamesSub = (s) => navigate(s === "odds" ? "/games" : `/games/${s}`);
 
-  const [parlaySub, setParlaySub] = useState("safe"); // safe|correlated
+  const [parlaySub, setParlaySub] = useState("safe"); // safe | correlated | analyze
+  const [analyzerLegs, setAnalyzerLegs] = useState([]);
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -2482,6 +2566,7 @@ export default function App() {
             {[
               { id: "safe", label: "🎰 Safe Parlays" },
               { id: "correlated", label: "🔗 Same-Game" },
+              { id: "analyze", label: "🔬 Analyze" },
             ].map(s => (
               <button key={s.id} onClick={() => setParlaySub(s.id)} style={{
                 flex: 1, padding: "8px 12px", borderRadius: 8, border: "none",
@@ -2881,6 +2966,217 @@ export default function App() {
             </div>
           </>
         )}
+
+        {/* ── PARLAY ANALYZER ── */}
+        {activeTab === "parlays" && parlaySub === "analyze" && (() => {
+          const upcoming = games.filter(g => {
+            const status = getGameStatus(g, liveScores);
+            return status !== "final" && status !== "blowout" && status !== "in_progress" && status !== "live_unknown";
+          });
+          const sportOptions = [...new Set(upcoming.map(g => g.sport_key))];
+          const analysis = analyzeParlay(analyzerLegs);
+          const addLeg = (game, marketType, outcomeName, point) => {
+            const info = analyzeLeg(game, marketType, outcomeName, point);
+            if (!info) return;
+            const legId = `${game.id}|${marketType}|${outcomeName}|${info.point ?? ""}`;
+            if (analyzerLegs.some(l => l.id === legId)) return;
+            setAnalyzerLegs([...analyzerLegs, {
+              id: legId,
+              gameId: game.id,
+              homeTeam: game.home_team,
+              awayTeam: game.away_team,
+              sportKey: game.sport_key,
+              commence: game.commence_time,
+              marketType,
+              outcome: outcomeName,
+              point: info.point,
+              odds: info.bestOdds,
+              book: info.bestBook,
+              fairProb: info.fairProb,
+              bookCount: info.bookCount,
+            }]);
+          };
+          const removeLeg = (id) => setAnalyzerLegs(analyzerLegs.filter(l => l.id !== id));
+          return (
+            <>
+              <div style={{ background: "#ecfeff", border: "1px solid #a5f3fc", borderRadius: 14, padding: "16px 18px", marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#155e75", marginBottom: 6 }}>🔬 Parlay Analyzer</div>
+                <div style={{ fontSize: 13, color: "#0e7490", lineHeight: 1.7 }}>
+                  Build a parlay leg by leg. We compare it against the vig-free market consensus and tell you whether the book is paying fair, better than fair, or ripping you off. Works best with 2–6 legs.
+                </div>
+              </div>
+
+              {/* Leg picker */}
+              <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14, padding: 16, marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Add a leg</div>
+                {upcoming.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#8b919a" }}>No upcoming games available.</div>
+                ) : (
+                  <div style={{ maxHeight: 360, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {upcoming
+                      .filter(g => activeSport === "all" || g.sport_key === activeSport)
+                      .slice(0, 40)
+                      .map(game => {
+                        const gameHasLeg = analyzerLegs.some(l => l.gameId === game.id);
+                        return (
+                          <div key={game.id} style={{
+                            border: "1px solid #e2e5ea", borderRadius: 10, padding: "10px 12px",
+                            background: gameHasLeg ? "#fefce8" : "#fafbfc",
+                          }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1d23", marginBottom: 6 }}>
+                              {game.away_team} @ {game.home_team}
+                              <span style={{ fontSize: 10, color: "#8b919a", marginLeft: 8, fontWeight: 500 }}>
+                                {formatTime(game.commence_time)}
+                                {gameHasLeg && <span style={{ color: "#d97706", marginLeft: 6 }}>⚠ same-game</span>}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {(() => {
+                                const buttons = [];
+                                ["h2h", "spreads", "totals"].forEach(mt => {
+                                  const { perOutcomeOffers } = collectMarketFairProbs(game, mt);
+                                  Object.entries(perOutcomeOffers).forEach(([, offers]) => {
+                                    if (!offers || offers.length === 0) return;
+                                    const best = offers.reduce((b, o) => (o.price > b.price ? o : b), offers[0]);
+                                    const pointStr = best.point !== null && best.point !== undefined
+                                      ? (best.point > 0 ? ` +${best.point}` : ` ${best.point}`) : "";
+                                    const label = mt === "h2h" ? "ML" : mt === "spreads" ? "SPR" : "TOT";
+                                    buttons.push(
+                                      <button key={`${mt}-${best.name}-${best.point ?? ""}`}
+                                        onClick={() => addLeg(game, mt, best.name, best.point)}
+                                        style={{
+                                          padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e5ea",
+                                          background: "#fff", fontSize: 11, cursor: "pointer",
+                                          fontFamily: "'DM Sans', sans-serif", color: "#1a1d23",
+                                        }}>
+                                        <span style={{ color: "#7c3aed", fontWeight: 700 }}>{label}</span>{" "}
+                                        {best.name}{pointStr}{" "}
+                                        <span style={{ fontFamily: "'Space Mono', monospace", color: "#0d9f4f", fontWeight: 700 }}>
+                                          {formatOdds(best.price)}
+                                        </span>
+                                      </button>
+                                    );
+                                  });
+                                });
+                                return buttons;
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Current legs */}
+              <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14, padding: 16, marginBottom: 18 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    Your parlay ({analyzerLegs.length} leg{analyzerLegs.length === 1 ? "" : "s"})
+                  </div>
+                  {analyzerLegs.length > 0 && (
+                    <button onClick={() => setAnalyzerLegs([])} style={{
+                      background: "none", border: "none", color: "#dc2626",
+                      fontSize: 11, fontWeight: 700, cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}>Clear all</button>
+                  )}
+                </div>
+                {analyzerLegs.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#8b919a", padding: "12px 0" }}>
+                    Pick outcomes above to start building your parlay.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {analyzerLegs.map(leg => {
+                      const mt = leg.marketType === "h2h" ? "Moneyline" : leg.marketType === "spreads" ? "Spread" : "Total";
+                      const pointStr = leg.point !== null && leg.point !== undefined
+                        ? (leg.point > 0 ? ` +${leg.point}` : ` ${leg.point}`) : "";
+                      return (
+                        <div key={leg.id} style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "8px 10px", border: "1px solid #e2e5ea", borderRadius: 8,
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1d23" }}>
+                              {leg.outcome}{pointStr}{" "}
+                              <span style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700 }}>{mt}</span>
+                            </div>
+                            <div style={{ fontSize: 10, color: "#8b919a", marginTop: 2 }}>
+                              {leg.awayTeam} @ {leg.homeTeam} · <BookLink book={leg.book} style={{ fontSize: 10 }} /> · fair {(leg.fairProb * 100).toFixed(1)}%
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: leg.odds > 0 ? "#0d9f4f" : "#1a1d23" }}>
+                              {formatOdds(leg.odds)}
+                            </div>
+                          </div>
+                          <button onClick={() => removeLeg(leg.id)} style={{
+                            background: "none", border: "none", color: "#8b919a",
+                            fontSize: 16, cursor: "pointer", padding: "0 4px",
+                          }} title="Remove leg">×</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Analysis */}
+              {analysis && (
+                <div style={{
+                  background: "linear-gradient(135deg, #1a1d23 0%, #2d3748 100%)",
+                  borderRadius: 16, padding: 20, color: "#fff", marginBottom: 18,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                    <div style={{
+                      background: analysis.verdictColor, color: "#fff",
+                      padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 800,
+                      textTransform: "uppercase", letterSpacing: "0.08em",
+                    }}>{analysis.verdict}</div>
+                    <div style={{ fontSize: 13, color: "#cbd5e0", fontWeight: 600 }}>
+                      {analysis.ev >= 0 ? "+" : ""}{analysis.ev.toFixed(1)}% EV
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#cbd5e0", lineHeight: 1.6, marginBottom: 14 }}>
+                    {analysis.verdictDetail}
+                  </div>
+                  {analysis.hasSameGame && (
+                    <div style={{
+                      background: "#7c2d12", border: "1px solid #c2410c",
+                      borderRadius: 8, padding: "8px 12px", fontSize: 11,
+                      color: "#fed7aa", marginBottom: 14, lineHeight: 1.5,
+                    }}>
+                      ⚠ Same-game legs detected. The EV estimate assumes independence; correlated legs inflate the true fair price — real EV is likely lower. Use the Same-Game tab for correlated plays.
+                    </div>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Combined odds</div>
+                      <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace", color: "#0d9f4f" }}>
+                        {formatOdds(analysis.combinedAmerican)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#8b919a" }}>pays {(analysis.combinedDecimal - 1).toFixed(2)}x your stake</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#8b919a", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Hit probability</div>
+                      <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Space Mono', monospace", color: "#fff" }}>
+                        {(analysis.fairProb * 100).toFixed(1)}%
+                      </div>
+                      <div style={{ fontSize: 10, color: "#8b919a" }}>book implies {(analysis.impliedProb * 100).toFixed(1)}%</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {analyzerLegs.length === 1 && (
+                <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 12, padding: "12px 16px", color: "#92400e", fontSize: 12, lineHeight: 1.6 }}>
+                  Add at least one more leg to see the parlay analysis.
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* ── TRACK RECORD TAB ── */}
         {activeTab === "record" && (() => {
