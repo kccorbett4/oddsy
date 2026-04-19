@@ -58,6 +58,21 @@ const LOCATIONS = [
   { id: "home", label: "Home only" },
   { id: "away", label: "Away only" },
 ];
+const DAYS = [
+  { id: 0, label: "Sun" }, { id: 1, label: "Mon" }, { id: 2, label: "Tue" },
+  { id: 3, label: "Wed" }, { id: 4, label: "Thu" }, { id: 5, label: "Fri" }, { id: 6, label: "Sat" },
+];
+const TIMES = [
+  { id: "any", label: "Any" },
+  { id: "daytime", label: "Daytime (6a–5p)" },
+  { id: "primetime", label: "Primetime (5p–11p)" },
+  { id: "latenight", label: "Late (11p–6a)" },
+];
+const NOTIFY_MODES = [
+  { id: "off", label: "Off" },
+  { id: "immediate", label: "Immediate" },
+  { id: "digest", label: "Daily digest" },
+];
 
 const DEFAULT_STRATEGY = () => ({
   id: null,
@@ -73,6 +88,19 @@ const DEFAULT_STRATEGY = () => ({
   maxPicksPerDay: 5,
   hoursWindow: 48,
   books: [],
+  // New filters
+  totalMin: 0,
+  totalMax: 300,
+  spreadMin: 0,
+  spreadMax: 30,
+  daysOfWeek: [],        // empty = any day
+  timeOfDay: "any",
+  minBookDisagreement: 0, // min spread between highest/lowest line across books
+  minHoursUntilTip: 0,
+  excludePrimetime: false,
+  maxVigPct: 15,         // reject offers where the book's vig exceeds this
+  // Notifications
+  notifyMode: "off",     // off | immediate | digest
   createdAt: new Date().toISOString(),
 });
 
@@ -98,15 +126,32 @@ const median = (arr) => {
 export function evaluateStrategy(strategy, games) {
   if (!games || games.length === 0) return [];
   const out = [];
-  const cutoff = Date.now() + (strategy.hoursWindow || 48) * 3600 * 1000;
+  const now = Date.now();
+  const cutoff = now + (strategy.hoursWindow || 48) * 3600 * 1000;
+  const minTipMs = now + (strategy.minHoursUntilTip || 0) * 3600 * 1000;
   const bookFilter = (strategy.books || []).length > 0 ? new Set(strategy.books) : null;
+  const daysFilter = (strategy.daysOfWeek && strategy.daysOfWeek.length > 0) ? new Set(strategy.daysOfWeek) : null;
+  const maxVig = typeof strategy.maxVigPct === "number" ? strategy.maxVigPct / 100 : 0.25;
 
   games.forEach(game => {
     if (!strategy.sports.includes(game.sport_key)) return;
     const commenceMs = new Date(game.commence_time).getTime();
     if (!Number.isFinite(commenceMs)) return;
-    if (commenceMs < Date.now()) return; // already started
+    if (commenceMs < now) return; // already started
+    if (commenceMs < minTipMs) return; // not yet in min-hours window
     if (commenceMs > cutoff) return;
+
+    const commenceDate = new Date(commenceMs);
+    const dow = commenceDate.getDay();
+    const hour = commenceDate.getHours();
+    if (daysFilter && !daysFilter.has(dow)) return;
+    const isDaytime = hour >= 6 && hour < 17;
+    const isPrimetime = hour >= 17 && hour < 23;
+    const isLateNight = hour >= 23 || hour < 6;
+    if (strategy.timeOfDay === "daytime" && !isDaytime) return;
+    if (strategy.timeOfDay === "primetime" && !isPrimetime) return;
+    if (strategy.timeOfDay === "latenight" && !isLateNight) return;
+    if (strategy.excludePrimetime && isPrimetime) return;
 
     strategy.markets.forEach(marketType => {
       // Two-way vig removal per book, then median fair prob across books.
@@ -120,12 +165,13 @@ export function evaluateStrategy(strategy, games) {
         const p2 = impliedProb(o2.price);
         const sum = p1 + p2;
         if (!(sum > 1.0 && sum < 1.25)) return;
+        const bookVig = sum - 1;
         [[o1, p1 / sum], [o2, p2 / sum]].forEach(([o, fair]) => {
           const key = `${o.name}_${o.point || ""}`;
           if (!perOutcomeFair[key]) perOutcomeFair[key] = [];
           if (!perOutcomeOffers[key]) perOutcomeOffers[key] = [];
           perOutcomeFair[key].push(fair);
-          perOutcomeOffers[key].push({ ...o, book: book.title });
+          perOutcomeOffers[key].push({ ...o, book: book.title, bookVig });
         });
       });
 
@@ -135,10 +181,23 @@ export function evaluateStrategy(strategy, games) {
         if (!fairProbs || fairProbs.length < strategy.minBooks) return;
         const vigFreeProb = median(fairProbs);
 
+        // Book disagreement (spread of points or prices across books for this outcome)
+        let disagreement = 0;
+        if (marketType === "spreads" || marketType === "totals") {
+          const points = outcomes.map(o => typeof o.point === "number" ? o.point : null).filter(p => p !== null);
+          if (points.length >= 2) disagreement = Math.max(...points) - Math.min(...points);
+        } else {
+          // For moneyline, use implied-prob spread × 100 as a disagreement proxy
+          const probs = outcomes.map(o => impliedProb(o.price));
+          if (probs.length >= 2) disagreement = (Math.max(...probs) - Math.min(...probs)) * 100;
+        }
+        if (disagreement < (strategy.minBookDisagreement || 0)) return;
+
         outcomes.forEach(outcome => {
           if (bookFilter && !bookFilter.has(outcome.book)) return;
           if (outcome.price < strategy.minOdds) return;
           if (outcome.price > strategy.maxOdds) return;
+          if (outcome.bookVig > maxVig) return;
           if (strategy.side === "fav" && outcome.price >= 0) return;
           if (strategy.side === "dog" && outcome.price <= 0) return;
           // Location filter only applies to h2h / spreads where we can
@@ -147,6 +206,16 @@ export function evaluateStrategy(strategy, games) {
             const isHome = outcome.name === game.home_team;
             if (strategy.location === "home" && !isHome) return;
             if (strategy.location === "away" && isHome) return;
+          }
+          // Market-specific point-range filters
+          if (marketType === "totals" && typeof outcome.point === "number") {
+            if (outcome.point < (strategy.totalMin ?? 0)) return;
+            if (outcome.point > (strategy.totalMax ?? 9999)) return;
+          }
+          if (marketType === "spreads" && typeof outcome.point === "number") {
+            const abs = Math.abs(outcome.point);
+            if (abs < (strategy.spreadMin ?? 0)) return;
+            if (abs > (strategy.spreadMax ?? 9999)) return;
           }
 
           const ev = calcEV(outcome.price, vigFreeProb);
@@ -198,10 +267,47 @@ const chipStyle = (active, color = "#1a73e8") => ({
   fontSize: 12, fontWeight: 700, fontFamily: "inherit",
 });
 
-function Section({ title, children }) {
+function InfoTip({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", marginLeft: 6, cursor: "help", verticalAlign: "middle" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+    >
+      <span style={{
+        width: 14, height: 14, borderRadius: "50%",
+        background: "#e2e5ea", color: "#5f6368",
+        fontSize: 9, fontWeight: 900, lineHeight: "14px", textAlign: "center",
+        display: "inline-block", fontFamily: "sans-serif",
+      }}>i</span>
+      {open && (
+        <span style={{
+          position: "absolute", bottom: "calc(100% + 6px)", left: "50%",
+          transform: "translateX(-50%)", zIndex: 20,
+          background: "#1a1d23", color: "#fff",
+          fontSize: 11, fontWeight: 500, lineHeight: 1.4,
+          padding: "8px 10px", borderRadius: 6,
+          width: 220, textAlign: "left",
+          textTransform: "none", letterSpacing: 0,
+          whiteSpace: "normal",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+        }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Section({ title, info, children }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={labelStyle}>{title}</div>
+      <div style={labelStyle}>
+        {title}
+        {info && <InfoTip text={info} />}
+      </div>
       {children}
     </div>
   );
@@ -431,7 +537,7 @@ export default function StrategyBuilder() {
       }}>
         {/* Form */}
         <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14, padding: "18px 18px" }}>
-          <Section title="Strategy name">
+          <Section title="Strategy name" info="A label for yourself so you can tell your strategies apart on the Track Record and in email alerts.">
             <input
               type="text"
               value={form.name}
@@ -442,7 +548,7 @@ export default function StrategyBuilder() {
             />
           </Section>
 
-          <Section title="Sports">
+          <Section title="Sports" info="Which leagues to scan. Pick one if you specialize; pick several for broader coverage.">
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {SPORTS.map(s => (
                 <button key={s.id} onClick={() => toggleArrayValue("sports", s.id)}
@@ -453,7 +559,7 @@ export default function StrategyBuilder() {
             </div>
           </Section>
 
-          <Section title="Markets">
+          <Section title="Markets" info="Moneyline = who wins. Spread = team covers the point handicap. Total = combined points over/under a number.">
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {MARKETS.map(m => (
                 <button key={m.id} onClick={() => toggleArrayValue("markets", m.id)}
@@ -465,13 +571,13 @@ export default function StrategyBuilder() {
           </Section>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Min EV %: ${form.minEv}%`}>
+            <Section title={`Min EV %: ${form.minEv}%`} info="Expected Value. A bet with +2% EV means if you placed it 100 times, you'd profit 2 units. Higher = pickier. Most sharps use 2–5%.">
               <input type="range" min="0" max="20" step="0.5"
                 value={form.minEv}
                 onChange={e => updateForm({ minEv: parseFloat(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Min books offering: ${form.minBooks}`}>
+            <Section title={`Min books offering: ${form.minBooks}`} info="How many sportsbooks must price the same line before we trust the market average. More books = more reliable consensus, fewer matches.">
               <input type="range" min="2" max="6" step="1"
                 value={form.minBooks}
                 onChange={e => updateForm({ minBooks: parseInt(e.target.value) })}
@@ -480,13 +586,13 @@ export default function StrategyBuilder() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Min odds: ${fmtOdds(form.minOdds)}`}>
+            <Section title={`Min odds: ${fmtOdds(form.minOdds)}`} info="Cheapest odds you'll accept. -250 means you won't bet a favorite priced steeper than -250 (too low payout).">
               <input type="range" min="-500" max="0" step="10"
                 value={form.minOdds}
                 onChange={e => updateForm({ minOdds: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Max odds: ${fmtOdds(form.maxOdds)}`}>
+            <Section title={`Max odds: ${fmtOdds(form.maxOdds)}`} info="Biggest longshot you'll consider. +300 means no underdogs priced above +300 (too unlikely to hit).">
               <input type="range" min="100" max="700" step="10"
                 value={form.maxOdds}
                 onChange={e => updateForm({ maxOdds: parseInt(e.target.value) })}
@@ -494,7 +600,7 @@ export default function StrategyBuilder() {
             </Section>
           </div>
 
-          <Section title="Side filter">
+          <Section title="Side filter" info="Favorites have negative odds (more likely to win). Underdogs have positive odds (bigger payout if they win).">
             <div style={{ display: "flex", gap: 6 }}>
               {SIDES.map(s => (
                 <button key={s.id} onClick={() => updateForm({ side: s.id })}
@@ -503,7 +609,7 @@ export default function StrategyBuilder() {
             </div>
           </Section>
 
-          <Section title="Home / Away (for moneyline & spreads)">
+          <Section title="Home / Away" info="Only applies to moneyline & spreads. Some bettors swear home underdogs or road favorites have an edge.">
             <div style={{ display: "flex", gap: 6 }}>
               {LOCATIONS.map(l => (
                 <button key={l.id} onClick={() => updateForm({ location: l.id })}
@@ -513,13 +619,13 @@ export default function StrategyBuilder() {
           </Section>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Section title={`Max picks per day: ${form.maxPicksPerDay}`}>
+            <Section title={`Max picks per day: ${form.maxPicksPerDay}`} info="Caps how many picks this strategy surfaces per day. Keeps your bankroll discipline in check.">
               <input type="range" min="1" max="25" step="1"
                 value={form.maxPicksPerDay}
                 onChange={e => updateForm({ maxPicksPerDay: parseInt(e.target.value) })}
                 style={{ width: "100%" }} />
             </Section>
-            <Section title={`Hours until tip: ${form.hoursWindow}h`}>
+            <Section title={`Max hours until tip: ${form.hoursWindow}h`} info="How far in advance to look. 48h = only games in the next 2 days. Shorter = fresher lines, fewer picks.">
               <input type="range" min="2" max="168" step="2"
                 value={form.hoursWindow}
                 onChange={e => updateForm({ hoursWindow: parseInt(e.target.value) })}
@@ -527,7 +633,7 @@ export default function StrategyBuilder() {
             </Section>
           </div>
 
-          <Section title={`Preferred books (${form.books.length === 0 ? "all" : form.books.length})`}>
+          <Section title={`Preferred books (${form.books.length === 0 ? "all" : form.books.length})`} info="Only return picks at books you actually have accounts with. Leave empty to consider all books.">
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {BOOKS.map(b => (
                 <button key={b} onClick={() => toggleArrayValue("books", b)}
@@ -537,6 +643,112 @@ export default function StrategyBuilder() {
             <div style={{ fontSize: 10, color: "#8b919a", marginTop: 6 }}>
               Leave empty to include all books.
             </div>
+          </Section>
+
+          {/* ── Advanced filters ─────────────────────────── */}
+          <div style={{ borderTop: "1px solid #e2e5ea", margin: "8px 0 18px" }} />
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", marginBottom: 12, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            Advanced filters
+          </div>
+
+          {form.markets.includes("totals") && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <Section title={`Min total (O/U): ${form.totalMin}`} info="Only consider games where the sportsbook total is above this number. Use to target high-scoring games.">
+                <input type="range" min="0" max="300" step="1"
+                  value={form.totalMin}
+                  onChange={e => updateForm({ totalMin: parseInt(e.target.value) })}
+                  style={{ width: "100%" }} />
+              </Section>
+              <Section title={`Max total (O/U): ${form.totalMax}`} info="Skip games with totals above this number. Use to avoid unpredictable shootouts.">
+                <input type="range" min="0" max="300" step="1"
+                  value={form.totalMax}
+                  onChange={e => updateForm({ totalMax: parseInt(e.target.value) })}
+                  style={{ width: "100%" }} />
+              </Section>
+            </div>
+          )}
+
+          {form.markets.includes("spreads") && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <Section title={`Min spread (abs): ${form.spreadMin}`} info="Only spreads with at least this many points of handicap (absolute value). 0 = any spread.">
+                <input type="range" min="0" max="30" step="0.5"
+                  value={form.spreadMin}
+                  onChange={e => updateForm({ spreadMin: parseFloat(e.target.value) })}
+                  style={{ width: "100%" }} />
+              </Section>
+              <Section title={`Max spread (abs): ${form.spreadMax}`} info="Skip blowout-spread games. 14 = no spread over 14pts either way.">
+                <input type="range" min="0" max="30" step="0.5"
+                  value={form.spreadMax}
+                  onChange={e => updateForm({ spreadMax: parseFloat(e.target.value) })}
+                  style={{ width: "100%" }} />
+              </Section>
+            </div>
+          )}
+
+          <Section title={`Days of week (${form.daysOfWeek.length === 0 ? "any" : form.daysOfWeek.length + " selected"})`} info="Only surface picks on specific days. Handy if you only bet weekends. Leave empty to allow any day.">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {DAYS.map(d => (
+                <button key={d.id} onClick={() => toggleArrayValue("daysOfWeek", d.id)}
+                  style={chipStyle(form.daysOfWeek.includes(d.id))}>{d.label}</button>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Time of day" info="Filter by when the game kicks off in your local time. Primetime = marquee national-TV games. Late-night = West Coast tip-offs.">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {TIMES.map(t => (
+                <button key={t.id} onClick={() => updateForm({ timeOfDay: t.id })}
+                  style={chipStyle(form.timeOfDay === t.id)}>{t.label}</button>
+              ))}
+            </div>
+          </Section>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Section title={`Book disagreement: ${form.minBookDisagreement}+ pts`} info="How much the books must disagree on this line before we trust it as an edge. Higher = pickier. 0.5 = at least half a point of disagreement across books.">
+              <input type="range" min="0" max="5" step="0.5"
+                value={form.minBookDisagreement}
+                onChange={e => updateForm({ minBookDisagreement: parseFloat(e.target.value) })}
+                style={{ width: "100%" }} />
+            </Section>
+            <Section title={`Min hours until tip: ${form.minHoursUntilTip}h`} info="Skip games starting too soon. Useful to avoid last-minute injury news. 3h = pick must be at least 3 hours before kickoff.">
+              <input type="range" min="0" max="24" step="1"
+                value={form.minHoursUntilTip}
+                onChange={e => updateForm({ minHoursUntilTip: parseInt(e.target.value) })}
+                style={{ width: "100%" }} />
+            </Section>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Section title={`Max vig at book: ${form.maxVigPct}%`} info="Reject offers at books with high juice. 4.5% is a standard -110/-110 line. Lower = only clean prices.">
+              <input type="range" min="3" max="15" step="0.5"
+                value={form.maxVigPct}
+                onChange={e => updateForm({ maxVigPct: parseFloat(e.target.value) })}
+                style={{ width: "100%" }} />
+            </Section>
+            <Section title="Exclude primetime" info="Skip 5p–11p games. Primetime lines tend to be sharper (more public money = books adjust quickly).">
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => updateForm({ excludePrimetime: false })}
+                  style={chipStyle(!form.excludePrimetime)}>Include</button>
+                <button onClick={() => updateForm({ excludePrimetime: true })}
+                  style={chipStyle(form.excludePrimetime)}>Exclude</button>
+              </div>
+            </Section>
+          </div>
+
+          {/* ── Notifications ─────────────────────────────── */}
+          <div style={{ borderTop: "1px solid #e2e5ea", margin: "8px 0 18px" }} />
+          <Section title="Email notifications" info="Off = no emails. Immediate = email when a new pick matches (deduped, so you only hear about each pick once). Daily digest = one summary email per day.">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {NOTIFY_MODES.map(m => (
+                <button key={m.id} onClick={() => updateForm({ notifyMode: m.id })}
+                  style={chipStyle(form.notifyMode === m.id)}>{m.label}</button>
+              ))}
+            </div>
+            {form.notifyMode !== "off" && user?.email && (
+              <div style={{ fontSize: 10, color: "#8b919a", marginTop: 8 }}>
+                Notifications will be sent to <strong>{user.email}</strong>.
+              </div>
+            )}
           </Section>
 
           <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
