@@ -468,7 +468,10 @@ async function handleOdds(req, res) {
       // Odds API shape for player props:
       //   o.name        = "Over" | "Under" | "Yes" | "No"  (the side)
       //   o.description = the player's name
-      // We want only the "Yes"/"Over" side (HR happens), keyed by player.
+      //   o.point       = threshold (0.5 = 1+ HR, 1.5 = 2+ HR, ...)
+      // The 0.5 line is the "anytime HR" market — the only one we use for
+      // the model. We keep the Over/Yes side, filter to the lowest point
+      // per (player, book), and drop multi-HR tiers.
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
         const m = (bm.markets || []).find(x => x.key === "batter_home_runs");
@@ -478,12 +481,22 @@ async function handleOdds(req, res) {
           if (o.name && /^(no|under)$/i.test(o.name)) continue;
           const playerName = (o.description || "").trim();
           if (!playerName) continue;
-          if (!byPlayer[playerName]) byPlayer[playerName] = [];
-          byPlayer[playerName].push({
+          const point = Number.isFinite(o.point) ? o.point : 0.5;
+          if (point > 0.5) continue; // skip 1.5+ / 2.5+ tiers
+          if (!byPlayer[playerName]) byPlayer[playerName] = {};
+          const prev = byPlayer[playerName][bm.title];
+          // If multiple 0.5-equivalent lines exist for the same book,
+          // prefer the one with the lowest (most conservative) odds,
+          // which is the actual anytime-HR market.
+          const cand = {
             book: bm.title,
+            point,
             overAmerican: o.price,
             overDecimal: +americanToDecimal(o.price).toFixed(3),
-          });
+          };
+          if (!prev || cand.overDecimal < prev.overDecimal) {
+            byPlayer[playerName][bm.title] = cand;
+          }
         }
       }
 
@@ -493,7 +506,10 @@ async function handleOdds(req, res) {
         commence: ev.commence_time,
         home: ev.home_team,
         away: ev.away_team,
-        players: Object.entries(byPlayer).map(([name, books]) => ({ name, books })),
+        players: Object.entries(byPlayer).map(([name, byBook]) => ({
+          name,
+          books: Object.values(byBook),
+        })),
       });
     }
 
