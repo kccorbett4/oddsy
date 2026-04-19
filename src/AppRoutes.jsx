@@ -11,6 +11,8 @@ import ReverseLineMovementPage from './seo-pages/ReverseLineMovementPage.jsx'
 import CorrelationParlayPage from './seo-pages/CorrelationParlayPage.jsx'
 import StaleLineDetectorPage from './seo-pages/StaleLineDetectorPage.jsx'
 import NarrativeRegressionPage from './seo-pages/NarrativeRegressionPage.jsx'
+import ShopPage from './ShopPage.jsx'
+import HomeRunsPage from './HomeRunsPage.jsx'
 
 export default function AppRoutes() {
   return (
@@ -28,6 +30,12 @@ export default function AppRoutes() {
       {/* Custom strategy builder */}
       <Route path="/strategy-builder" element={<StrategyBuilder />} />
       <Route path="/strategy-builder/:id" element={<StrategyBuilder />} />
+
+      {/* Interactive book shop — live odds side by side */}
+      <Route path="/shop" element={<ShopPage />} />
+
+      {/* Home run prop hunter */}
+      <Route path="/homeruns" element={<HomeRunsPage />} />
 
       {/* SEO landing pages */}
       <Route path="/ev-betting" element={<EvBettingPage />} />

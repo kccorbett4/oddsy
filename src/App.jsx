@@ -1432,6 +1432,8 @@ export default function App() {
   const [analyzerSearch, setAnalyzerSearch] = useState("");
   const [analyzerSport, setAnalyzerSport] = useState("all");
   const [analyzerBook, setAnalyzerBook] = useState("any");
+  const [pickInfoOpen, setPickInfoOpen] = useState(null); // which strategy's "how it works" is showing
+  const [bookCompareOpen, setBookCompareOpen] = useState(false); // parlay per-book breakdown popover
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -2050,6 +2052,30 @@ export default function App() {
                     }}>NEW</span>
                     Build Your Own Strategy →
                   </button>
+                  <Link to="/homeruns" style={{
+                    padding: "10px 18px 10px 14px", borderRadius: 10,
+                    border: "1px solid #fbbf24",
+                    background: "rgba(251, 191, 36, 0.12)", color: "#fbbf24",
+                    fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, letterSpacing: "0.08em",
+                      background: "#fbbf24", color: "#78350f",
+                      padding: "2px 6px", borderRadius: 4,
+                    }}>NEW</span>
+                    💣 HR Hunter →
+                  </Link>
+                  <Link to="/shop" style={{
+                    padding: "10px 18px", borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "transparent", color: "#fff", fontSize: 13, fontWeight: 700,
+                    cursor: "pointer", textDecoration: "none",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    🏦 Book Shop
+                  </Link>
                 </div>
               </div>
 
@@ -2347,6 +2373,33 @@ export default function App() {
             { id: "narrative", label: "📉 Narrative", count: narrativePlays.length, color: "#d97706" },
           ];
 
+          const chipInfo = {
+            all: {
+              title: "All Picks",
+              body: "Every edge we found across all strategies, deduplicated so the same bet from two strategies only shows once. Ranked by edge size.",
+            },
+            sharp: {
+              title: "🧠 Sharp Plays",
+              body: "Bets where our fair-value model disagrees with the book by enough that, after removing the vig, the book's implied probability is meaningfully lower than the true hit rate. We compute fair odds by taking the median implied probability across every sportsbook (with two-way vig removed), then flag bets where a single book's price pays at least 4% more than that consensus fair line.",
+            },
+            value: {
+              title: "⚡ Value Bets",
+              body: "Bets with positive expected value ≥3% based on our consensus fair line. EV = (fair probability × payout) − (1 − fair probability). We take the best price available across all books and compare it to the consensus fair probability after removing vig.",
+            },
+            stale: {
+              title: "⏱️ Stale Lines",
+              body: "Lines at one book that haven't moved to match where the rest of the market has settled. We flag a book's price when it differs from the consensus by 4+ cents of implied probability, meaning that specific book is slow to update and you're getting a price the market has already moved past.",
+            },
+            rlm: {
+              title: "🔄 Reverse Line Movement",
+              body: "Lines moving opposite of where the public money is going. When 70%+ of bets are on one side but the line moves toward the other side, it means sharp money (larger, smarter bets) is on the unpopular side — books move lines for dollars, not ticket count.",
+            },
+            narrative: {
+              title: "📉 Narrative Regression",
+              body: "Teams on extreme hot or cold streaks that the market has over-corrected on. We track recent-game results and flag when the line has moved more than the underlying team quality (FPI/BPI) justifies — the market is pricing the narrative, not the team.",
+            },
+          };
+
           const bannerStats = pickFilter === "all" ? null : strategyStats[pickFilter];
           const bannerLabel = {
             sharp: "Sharp Plays", value: "Value Bets", stale: "Stale Lines",
@@ -2378,18 +2431,56 @@ export default function App() {
               <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 10, marginBottom: 10 }}>
                 {chips.map(c => {
                   const isActive = pickFilter === c.id;
+                  const infoActive = pickInfoOpen === c.id;
                   return (
-                    <button key={c.id} onClick={() => setPickFilter(c.id)} style={{
-                      padding: "8px 14px", borderRadius: 20, border: `1px solid ${isActive ? c.color : "#e2e5ea"}`,
-                      background: isActive ? c.color : "#fff", color: isActive ? "#fff" : "#4a5568",
-                      fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-                      fontFamily: "'DM Sans', sans-serif", flexShrink: 0,
+                    <div key={c.id} style={{
+                      display: "inline-flex", alignItems: "stretch", flexShrink: 0,
+                      borderRadius: 20, overflow: "hidden",
+                      border: `1px solid ${isActive ? c.color : "#e2e5ea"}`,
+                      background: isActive ? c.color : "#fff",
                     }}>
-                      {c.label} <span style={{ opacity: 0.7, fontWeight: 600 }}>({c.count})</span>
-                    </button>
+                      <button onClick={() => setPickFilter(c.id)} style={{
+                        padding: "8px 10px 8px 14px", border: "none", background: "transparent",
+                        color: isActive ? "#fff" : "#4a5568",
+                        fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}>
+                        {c.label} <span style={{ opacity: 0.7, fontWeight: 600 }}>({c.count})</span>
+                      </button>
+                      <button
+                        onClick={() => setPickInfoOpen(infoActive ? null : c.id)}
+                        title={`How ${c.label} works`}
+                        aria-label={`How ${c.label} works`}
+                        style={{
+                          padding: "0 10px 0 4px", border: "none", background: "transparent",
+                          color: isActive ? "rgba(255,255,255,0.85)" : "#8b919a",
+                          fontSize: 11, fontWeight: 900, cursor: "pointer",
+                          fontFamily: "'DM Sans', sans-serif",
+                          textDecoration: infoActive ? "underline" : "none",
+                        }}
+                      >ⓘ</button>
+                    </div>
                   );
                 })}
               </div>
+
+              {pickInfoOpen && chipInfo[pickInfoOpen] && (
+                <div style={{
+                  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
+                  padding: "12px 14px", marginBottom: 12, position: "relative",
+                }}>
+                  <button onClick={() => setPickInfoOpen(null)} style={{
+                    position: "absolute", top: 8, right: 10, border: "none", background: "transparent",
+                    fontSize: 16, color: "#94a3b8", cursor: "pointer", lineHeight: 1,
+                  }} title="Close">×</button>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1d23", marginBottom: 4 }}>
+                    {chipInfo[pickInfoOpen].title}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6, paddingRight: 16 }}>
+                    {chipInfo[pickInfoOpen].body}
+                  </div>
+                </div>
+              )}
 
               {bannerStats && <PerformanceBanner stats={bannerStats} label={bannerLabel} />}
 
@@ -3330,6 +3421,44 @@ export default function App() {
                     // Only recommend when another book is meaningfully better
                     // (≥1.5% payout bump) than the user's pinned book.
                     const showRec = current && best.book !== currentBook && improvement >= 1.5;
+
+                    const InfoButton = ({ bg, border, color }) => (
+                      <button
+                        onClick={() => setBookCompareOpen(v => !v)}
+                        style={{
+                          marginLeft: 8, width: 18, height: 18, borderRadius: 999,
+                          background: bg, color, border: `1px solid ${border}`,
+                          fontSize: 11, fontWeight: 800, cursor: "pointer", lineHeight: 1,
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          verticalAlign: "middle",
+                        }}
+                        title="Show each book's price on this parlay"
+                      >i</button>
+                    );
+
+                    const CompareList = ({ bg }) => (
+                      <div style={{
+                        marginTop: 10, background: bg, borderRadius: 6, padding: "8px 10px",
+                      }}>
+                        <div style={{ fontSize: 10, color: "#cbd5e0", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 6 }}>
+                          Per-book payout
+                        </div>
+                        {bookCompare.map((r, i) => (
+                          <div key={r.book} style={{
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                            padding: "3px 0", fontSize: 11,
+                            color: i === 0 ? "#6ee7b7" : "#e2e8f0",
+                            fontWeight: i === 0 ? 800 : 500,
+                          }}>
+                            <span>{i === 0 ? "🏆 " : ""}{r.book}</span>
+                            <span style={{ fontFamily: "'Space Mono', monospace" }}>
+                              {formatOdds(r.american)} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({(r.decimal - 1).toFixed(2)}x)</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+
                     if (showRec) {
                       return (
                         <div style={{
@@ -3338,10 +3467,12 @@ export default function App() {
                         }}>
                           <div style={{ fontSize: 12, fontWeight: 800, color: "#6ee7b7", marginBottom: 4 }}>
                             💰 Shop this parlay: <span style={{ color: "#fff" }}>{best.book}</span> pays <span style={{ fontFamily: "'Space Mono', monospace" }}>{formatOdds(best.american)}</span>
+                            <InfoButton bg="#065f46" border="#10b981" color="#6ee7b7" />
                           </div>
                           <div style={{ fontSize: 11, color: "#a7f3d0" }}>
                             {currentBook} pays {formatOdds(current.american)} on the same legs. Switching books boosts payout by {improvement.toFixed(1)}% (pays {(best.decimal - 1).toFixed(2)}x vs {(current.decimal - 1).toFixed(2)}x on a $1 stake).
                           </div>
+                          {bookCompareOpen && <CompareList bg="#022c22" />}
                         </div>
                       );
                     }
@@ -3355,10 +3486,12 @@ export default function App() {
                         }}>
                           <div style={{ fontSize: 12, fontWeight: 800, color: "#bfdbfe", marginBottom: 4 }}>
                             🏦 Best book for this parlay: <span style={{ color: "#fff" }}>{best.book}</span> at <span style={{ fontFamily: "'Space Mono', monospace" }}>{formatOdds(best.american)}</span>
+                            <InfoButton bg="#1e40af" border="#60a5fa" color="#bfdbfe" />
                           </div>
                           <div style={{ fontSize: 11, color: "#dbeafe" }}>
                             Compared across {bookCompare.length} book{bookCompare.length === 1 ? "" : "s"} that offer all {analyzerLegs.length} legs. Pin a book above to see that book's exact price.
                           </div>
+                          {bookCompareOpen && <CompareList bg="#172554" />}
                         </div>
                       );
                     }
