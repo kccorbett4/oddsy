@@ -1844,12 +1844,19 @@ export default function App() {
                     Track Record
                   </button>
                   <button onClick={openStrategyBuilder} style={{
-                    padding: "10px 20px", borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "transparent", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    padding: "10px 18px 10px 14px", borderRadius: 10,
+                    border: "1px solid #68d391",
+                    background: "rgba(104, 211, 145, 0.12)", color: "#68d391",
+                    fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8,
                     fontFamily: "'DM Sans', sans-serif",
                   }}>
-                    Build a Strategy
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, letterSpacing: "0.08em",
+                      background: "#68d391", color: "#0f4d2a",
+                      padding: "2px 6px", borderRadius: 4,
+                    }}>NEW</span>
+                    Build Your Own Strategy →
                   </button>
                 </div>
               </div>
@@ -1883,6 +1890,47 @@ export default function App() {
                   <div style={{ fontSize: 10, color: "#8b919a" }}>{totalUnits >= 0 ? "+" : ""}{totalUnits.toFixed(1)}u · {decidedCount} settled</div>
                 </div>
               </div>
+
+              {/* Strategy Builder — dedicated spotlight card */}
+              <button onClick={openStrategyBuilder} style={{
+                width: "100%", textAlign: "left", cursor: "pointer",
+                background: "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)",
+                border: "none", borderRadius: 16, padding: isMobile ? "20px 18px" : "22px 24px",
+                marginBottom: 22, color: "#fff", fontFamily: "inherit",
+                display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16,
+                boxShadow: "0 4px 20px rgba(124, 58, 237, 0.25)",
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    fontSize: 10, fontWeight: 900, color: "#fbd38d",
+                    letterSpacing: "0.12em", textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}>
+                    <span>⚙️</span>
+                    <span>Exclusive to Oddsy</span>
+                  </div>
+                  <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, lineHeight: 1.2, marginBottom: 6 }}>
+                    Build your own betting strategy.
+                  </div>
+                  <div style={{ fontSize: 13, color: "#e9d8fd", lineHeight: 1.5, marginBottom: 12 }}>
+                    Define your own filters — sports, markets, min EV, odds range — and we'll track its performance live. {isMobile ? "" : "No other tool lets you do this."}
+                  </div>
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    background: "#fff", color: "#4c1d95",
+                    padding: "8px 14px", borderRadius: 8,
+                    fontSize: 13, fontWeight: 800,
+                  }}>
+                    Start Building →
+                  </div>
+                </div>
+                {!isMobile && (
+                  <div style={{
+                    flexShrink: 0, fontSize: 64, opacity: 0.3, lineHeight: 1,
+                  }}>⚙️</div>
+                )}
+              </button>
 
               {/* Today's top picks */}
               <div style={{ marginBottom: 22 }}>
