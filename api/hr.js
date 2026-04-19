@@ -686,6 +686,90 @@ async function handleCoverage(req, res) {
   });
 }
 
+// ──────────────────────── scraper healthcheck ────────────────────────
+// Daily cron pings this. We hit the DK/FD scrapers directly (not the
+// cached odds payload, which may be stale) and track consecutive failure
+// days per book. Alert email goes out once after two consecutive failed
+// days — then suppressed for 7 days to avoid spam until the scraper
+// either recovers (resetting state) or the suppress TTL expires.
+async function sendAlertEmail({ subject, html }) {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.NOTIFY_FROM || "Oddsy Alerts <onboarding@resend.dev>";
+  const to = process.env.ALERT_EMAIL || "kccorbett4@gmail.com";
+  if (!key) return { skipped: true, reason: "RESEND_API_KEY not set" };
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+  if (!r.ok) throw new Error(`resend ${r.status}: ${await r.text()}`);
+  return { sent: true, to };
+}
+
+async function handleHealthcheck(req, res) {
+  const redis = await getRedis();
+  try {
+    const scraped = await fetchScrapedHr();
+    const status = {
+      draftkings: scraped?.draftkings?.ok ? "ok" : (scraped?.draftkings?.error || "unknown"),
+      fanduel: scraped?.fanduel?.ok ? "ok" : (scraped?.fanduel?.error || "unknown"),
+    };
+    const alerts = [];
+
+    for (const book of ["draftkings", "fanduel"]) {
+      const failKey = `hralert:fails:${book}`;
+      const notifiedKey = `hralert:notified:${book}`;
+      const ok = scraped?.[book]?.ok === true;
+
+      if (ok) {
+        if (redis) { try { await redis.del(failKey); await redis.del(notifiedKey); } catch {} }
+        continue;
+      }
+
+      let fails = 1;
+      let alreadyNotified = false;
+      if (redis) {
+        try {
+          const prev = await redis.get(failKey);
+          fails = (Number.isFinite(parseInt(prev)) ? parseInt(prev) : 0) + 1;
+          await redis.set(failKey, String(fails), { EX: 14 * 86400 });
+          alreadyNotified = !!(await redis.get(notifiedKey));
+        } catch {}
+      }
+
+      if (fails >= 2 && !alreadyNotified) {
+        const title = book === "draftkings" ? "DraftKings" : "FanDuel";
+        const err = scraped?.[book]?.error || "unknown error";
+        const html = `<!doctype html><html><body style="font-family:system-ui,sans-serif;padding:20px;background:#f5f6f8;">
+          <div style="max-width:520px;margin:auto;background:#fff;padding:20px;border-radius:12px;">
+            <div style="font-size:12px;font-weight:700;color:#dc2626;letter-spacing:0.1em;text-transform:uppercase;">Oddsy Scraper Alert</div>
+            <h2 style="margin:8px 0 12px;color:#1a1d23;">${title} scraper down for ${fails} days</h2>
+            <p style="color:#4b5563;line-height:1.5;">The supplementary scraper for <b>${title}</b> has failed two days in a row. The Odds API feed is still flowing — this only affects the ${title}-specific HR lines.</p>
+            <div style="background:#fef2f2;border-left:4px solid #dc2626;padding:10px 14px;margin:14px 0;font-family:monospace;font-size:12px;color:#7f1d1d;white-space:pre-wrap;">${err.replace(/</g, "&lt;")}</div>
+            <p style="color:#4b5563;line-height:1.5;font-size:13px;">Their endpoint likely shifted. Ask Claude to inspect the scraper in <code>api/_hr_scrape.js</code> and patch the URL / response shape for ${title}.</p>
+            <p style="font-size:11px;color:#8b919a;margin-top:18px;">Alert suppressed for 7 days unless ${title} recovers and re-fails.</p>
+          </div>
+        </body></html>`;
+        try {
+          const result = await sendAlertEmail({ subject: `[Oddsy] ${title} scraper down ${fails}d`, html });
+          alerts.push({ book, fails, ...result });
+          if (redis) { try { await redis.set(notifiedKey, "1", { EX: 7 * 86400 }); } catch {} }
+        } catch (e) {
+          alerts.push({ book, fails, error: e.message });
+        }
+      } else {
+        alerts.push({ book, fails, notified: alreadyNotified, action: "suppressed" });
+      }
+    }
+
+    return res.status(200).json({ ok: true, status, alerts, checkedAt: new Date().toISOString() });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  } finally {
+    if (redis) await redis.disconnect().catch(() => {});
+  }
+}
+
 // ──────────────────────── dispatcher ────────────────────────
 export default async function handler(req, res) {
   const action = req.query?.action || "context";
@@ -694,6 +778,7 @@ export default async function handler(req, res) {
     if (action === "odds") return await handleOdds(req, res);
     if (action === "bvp") return await handleBvp(req, res);
     if (action === "coverage") return await handleCoverage(req, res);
+    if (action === "healthcheck") return await handleHealthcheck(req, res);
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
