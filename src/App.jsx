@@ -1396,6 +1396,7 @@ export default function App() {
   const [parlaySub, setParlaySub] = useState("safe"); // safe | correlated | analyze
   const [analyzerLegs, setAnalyzerLegs] = useState([]);
   const [analyzerSearch, setAnalyzerSearch] = useState("");
+  const [analyzerSport, setAnalyzerSport] = useState("all");
   const [showAlertBuilder, setShowAlertBuilder] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -3040,12 +3041,31 @@ export default function App() {
                     }}>✕</button>
                   )}
                 </div>
+                {sportOptions.length > 1 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                    {["all", ...sportOptions].map(sk => {
+                      const meta = SPORTS.find(s => s.id === sk);
+                      const label = sk === "all" ? "All" : (meta ? `${meta.icon} ${meta.name}` : sk);
+                      const active = analyzerSport === sk;
+                      return (
+                        <button key={sk} onClick={() => setAnalyzerSport(sk)} style={{
+                          padding: "5px 10px", borderRadius: 999,
+                          border: active ? "1px solid #1a1d23" : "1px solid #e2e5ea",
+                          background: active ? "#1a1d23" : "#fff",
+                          color: active ? "#fff" : "#1a1d23",
+                          fontSize: 11, fontWeight: 700, cursor: "pointer",
+                          fontFamily: "'DM Sans', sans-serif",
+                        }}>{label}</button>
+                      );
+                    })}
+                  </div>
+                )}
                 {upcoming.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#8b919a" }}>No upcoming games available.</div>
                 ) : (() => {
                   const q = analyzerSearch.trim().toLowerCase();
                   const filtered = upcoming
-                    .filter(g => activeSport === "all" || g.sport_key === activeSport)
+                    .filter(g => analyzerSport === "all" || g.sport_key === analyzerSport)
                     .filter(g => !q || g.home_team?.toLowerCase().includes(q) || g.away_team?.toLowerCase().includes(q));
                   if (filtered.length === 0) {
                     return <div style={{ fontSize: 12, color: "#8b919a" }}>No games match “{analyzerSearch}”.</div>;
