@@ -3099,11 +3099,25 @@ export default function App() {
                 })()}
               </div>
 
-              {/* Current legs */}
-              <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14, padding: 16, marginBottom: 18 }}>
+              {/* Current legs — sticky to bottom of viewport */}
+              <div style={{
+                position: "sticky", bottom: 12, zIndex: 20,
+                background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14,
+                padding: 16, marginBottom: 18,
+                boxShadow: "0 -8px 24px rgba(26,29,35,0.12), 0 2px 6px rgba(26,29,35,0.06)",
+              }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1d23", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                     Your parlay ({analyzerLegs.length} leg{analyzerLegs.length === 1 ? "" : "s"})
+                    {analysis && (
+                      <span style={{
+                        marginLeft: 10, padding: "2px 8px", borderRadius: 6,
+                        background: analysis.verdictColor, color: "#fff",
+                        fontSize: 10, fontWeight: 800, letterSpacing: "0.05em",
+                      }}>
+                        {formatOdds(analysis.combinedAmerican)} · {analysis.ev >= 0 ? "+" : ""}{analysis.ev.toFixed(1)}% EV
+                      </span>
+                    )}
                   </div>
                   {analyzerLegs.length > 0 && (
                     <button onClick={() => setAnalyzerLegs([])} style={{
@@ -3118,7 +3132,7 @@ export default function App() {
                     Pick outcomes above to start building your parlay.
                   </div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
                     {analyzerLegs.map(leg => {
                       const mt = leg.marketType === "h2h" ? "Moneyline" : leg.marketType === "spreads" ? "Spread" : "Total";
                       const pointStr = leg.point !== null && leg.point !== undefined
