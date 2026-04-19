@@ -15,6 +15,7 @@ import ShopPage from './ShopPage.jsx'
 import HomeRunsPage from './HomeRunsPage.jsx'
 import HrParlaysPage from './HrParlaysPage.jsx'
 import ArbitragePage from './ArbitragePage.jsx'
+import PredictionMarketsPage from './PredictionMarketsPage.jsx'
 
 export default function AppRoutes() {
   return (
@@ -42,6 +43,9 @@ export default function AppRoutes() {
 
       {/* Arbitrage finder */}
       <Route path="/arbitrage" element={<ArbitragePage />} />
+
+      {/* Kalshi + Polymarket prediction markets */}
+      <Route path="/prediction-markets" element={<PredictionMarketsPage />} />
 
       {/* SEO landing pages */}
       <Route path="/ev-betting" element={<EvBettingPage />} />

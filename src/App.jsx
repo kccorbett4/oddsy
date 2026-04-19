@@ -2038,12 +2038,22 @@ export default function App() {
                     display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
                     fontFamily: "'DM Sans', sans-serif",
                   }}>
+                    🔄 Arbitrage
+                  </Link>
+                  <Link to="/prediction-markets" style={{
+                    padding: "10px 18px 10px 14px", borderRadius: 10,
+                    border: "1px solid #7dd3fc",
+                    background: "rgba(125, 211, 252, 0.14)", color: "#7dd3fc",
+                    fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
                     <span style={{
                       fontSize: 9, fontWeight: 900, letterSpacing: "0.08em",
-                      background: "#34d399", color: "#064e3b",
+                      background: "#7dd3fc", color: "#0c4a6e",
                       padding: "2px 6px", borderRadius: 4,
                     }}>NEW</span>
-                    💰 Arbitrage →
+                    🔮 Prediction Markets →
                   </Link>
                 </div>
               </div>

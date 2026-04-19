@@ -12,6 +12,7 @@ export const TAB_PATHS = {
   hr: "/homeruns",
   shop: "/shop",
   arbitrage: "/arbitrage",
+  markets: "/prediction-markets",
   record: "/record",
 };
 
@@ -23,6 +24,7 @@ export function tabFromPath(pathname) {
   if (pathname.startsWith("/homeruns")) return "hr";
   if (pathname.startsWith("/shop")) return "shop";
   if (pathname.startsWith("/arbitrage")) return "arbitrage";
+  if (pathname.startsWith("/prediction-markets")) return "markets";
   if (pathname.startsWith("/record")) return "record";
   if (pathname.startsWith("/strategy-builder")) return "strategy";
   return "home";
@@ -33,9 +35,10 @@ const DESKTOP_TABS = [
   { id: "picks", path: "/picks", label: "Picks", icon: "💰" },
   { id: "parlays", path: "/parlays", label: "Parlays", icon: "🎰" },
   { id: "games", path: "/games", label: "Games", icon: "📊" },
-  { id: "hr", path: "/homeruns", label: "HR Hunter", icon: "💣" },
+  { id: "hr", path: "/homeruns", label: "HR", icon: "💣" },
   { id: "shop", path: "/shop", label: "Shop", icon: "🏦" },
   { id: "arbitrage", path: "/arbitrage", label: "Arbitrage", icon: "🔄" },
+  { id: "markets", path: "/prediction-markets", label: "Markets", icon: "🔮" },
   { id: "record", path: "/record", label: "Record", icon: "📈" },
 ];
 
@@ -52,6 +55,7 @@ const MORE_ITEMS = [
   { path: "/homeruns", label: "HR Hunter", icon: "💣", desc: "Top home run props" },
   { path: "/shop", label: "Book Shop", icon: "🏦", desc: "Compare live odds" },
   { path: "/arbitrage", label: "Arbitrage", icon: "🔄", desc: "Guaranteed-profit bets" },
+  { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi & Polymarket" },
   { path: "/strategy-builder", label: "Build Your Own", icon: "🛠️", desc: "Custom pick filters" },
   { path: "/record", label: "Track Record", icon: "📈", desc: "Historical performance" },
 ];
