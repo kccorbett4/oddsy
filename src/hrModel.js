@@ -187,15 +187,17 @@ function findSavant(savant, mlbamId) {
 }
 
 // Build a handful of realistic recommended parlays from the projection
-// pool. "Realistic" here means every leg is priced at ≤ maxAmerican
-// (default +1000, so no lottery tickets), no two legs share a game
-// (correlation), and the final combo still carries non-negative modeled
-// EV. Enumerates combos sized per legsSizes (default [2, 3]) and returns
-// a few named slots so the UI can label them.
+// pool. "Realistic" here means:
+//   - every leg priced at ≤ maxAmerican (no lottery tickets)
+//   - no two legs share a game (correlation)
+//   - every leg is actually offered by the SAME book (you can't place a
+//     cross-book parlay in real life), priced at that book's odds
+//   - the final combo still carries non-negative modeled EV
+// We pick the best (highest-payout) single book that prices every leg.
 export function buildRecommendedParlays(projections, {
   maxAmerican = 1000,
   legsSizes = [2, 3],
-  poolSize = 12,
+  poolSize = 15,
 } = {}) {
   const pool = projections
     .filter(p => p.bestAmerican != null && p.bestAmerican <= maxAmerican && p.modelProb > 0)
@@ -204,12 +206,51 @@ export function buildRecommendedParlays(projections, {
   if (pool.length < 2) return [];
 
   const gameOf = (p) => `${p.game.home}@${p.game.away}`;
-  const score = (legs) => {
+
+  // Score a combo under a same-book constraint. For each book that
+  // offers every leg, compute combined decimal + EV at that book's
+  // prices; pick the book with the highest payout. If no single book
+  // prices every leg, the combo is not placeable — return null.
+  const scoreSameBook = (legs) => {
+    const sets = legs.map(l => new Set(Object.keys(l.byBook || {})));
+    if (sets.some(s => s.size === 0)) return null;
+    const common = [...sets[0]].filter(b => sets.every(s => s.has(b)));
+    if (common.length === 0) return null;
+
     const prob = legs.reduce((a, l) => a * l.modelProb, 1);
-    const dec = legs.reduce((a, l) => a * l.bestDecimal, 1);
-    const ev = (prob * (dec - 1) - (1 - prob)) * 100;
-    return { legs, size: legs.length, prob, dec, american: decimalToAmerican(dec), ev };
+    let best = null;
+    for (const book of common) {
+      const bookLegs = legs.map(l => {
+        const b = l.byBook[book];
+        return {
+          ...l,
+          bestBook: book,
+          bestAmerican: b.overAmerican,
+          bestDecimal: b.overDecimal,
+          booksImplied: 1 / b.overDecimal,
+          edgePct: (l.modelProb - 1 / b.overDecimal) * 100,
+          evPct: (l.modelProb * (b.overDecimal - 1) - (1 - l.modelProb)) * 100,
+        };
+      });
+      // Enforce the max-american cap at this specific book too — a leg
+      // might only hit ≤ +1000 at a different book and blow through here.
+      if (bookLegs.some(bl => bl.bestAmerican > maxAmerican)) continue;
+      const dec = bookLegs.reduce((a, bl) => a * bl.bestDecimal, 1);
+      const ev = (prob * (dec - 1) - (1 - prob)) * 100;
+      if (!best || dec > best.dec) best = { book, bookLegs, dec, ev };
+    }
+    if (!best) return null;
+    return {
+      legs: best.bookLegs,
+      book: best.book,
+      size: legs.length,
+      prob,
+      dec: best.dec,
+      american: decimalToAmerican(best.dec),
+      ev: best.ev,
+    };
   };
+
   const combosOfSize = (size) => {
     const out = [];
     const rec = (start, cur) => {
@@ -226,23 +267,35 @@ export function buildRecommendedParlays(projections, {
 
   const scoredBySize = {};
   for (const sz of legsSizes) {
-    scoredBySize[sz] = combosOfSize(sz).map(score).filter(s => s.ev >= 0);
+    scoredBySize[sz] = combosOfSize(sz)
+      .map(scoreSameBook)
+      .filter(s => s && s.ev >= 0);
   }
 
   const picks = [];
+  const taken = new Set();
+  const keyOf = (s) => `${s.book}|${s.legs.map(l => `${l.batterId}`).sort().join(",")}`;
+  const push = (slot) => {
+    if (!slot) return;
+    const k = keyOf(slot);
+    if (taken.has(k)) return;
+    taken.add(k);
+    picks.push(slot);
+  };
+
   if (scoredBySize[2]?.length) {
     const safer = [...scoredBySize[2]].sort((a, b) => b.prob - a.prob)[0];
     const value = [...scoredBySize[2]].sort((a, b) => b.ev - a.ev)[0];
-    if (safer) picks.push({ label: "Safer 2-leg", subtitle: "Highest hit rate among +EV pairs", ...safer });
-    if (value && value.legs !== safer?.legs) picks.push({ label: "Value 2-leg", subtitle: "Best model edge at 2 legs", ...value });
+    if (safer) push({ label: "Safer 2-leg", subtitle: "Highest hit rate among +EV pairs", ...safer });
+    if (value) push({ label: "Value 2-leg", subtitle: "Best model edge at 2 legs", ...value });
   }
   if (scoredBySize[3]?.length) {
     const swing = [...scoredBySize[3]].sort((a, b) => b.ev - a.ev)[0];
-    if (swing) picks.push({ label: "Swing 3-leg", subtitle: "Bigger payout, still +EV", ...swing });
+    if (swing) push({ label: "Swing 3-leg", subtitle: "Bigger payout, still +EV", ...swing });
   }
   if (scoredBySize[4]?.length) {
     const jackpot = [...scoredBySize[4]].sort((a, b) => b.ev - a.ev)[0];
-    if (jackpot) picks.push({ label: "4-leg jackpot", subtitle: "Long-shot stack with positive model edge", ...jackpot });
+    if (jackpot) push({ label: "4-leg jackpot", subtitle: "Long-shot stack with positive model edge", ...jackpot });
   }
   return picks;
 }

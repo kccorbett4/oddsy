@@ -184,7 +184,15 @@ export default function HrParlaysPage() {
                     {formatOdds(r.american)}
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: "#8b919a", marginBottom: 10 }}>{r.subtitle}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: "#8b919a" }}>{r.subtitle}</div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 12,
+                    background: "#ede9fe", color: "#5b21b6", textTransform: "uppercase", letterSpacing: "0.06em",
+                  }}>
+                    @ {r.book}
+                  </div>
+                </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
                   {r.legs.map(l => (
@@ -209,7 +217,7 @@ export default function HrParlaysPage() {
                         <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: "#0d9f4f" }}>
                           {formatOdds(l.bestAmerican)}
                         </div>
-                        <div style={{ fontSize: 9, color: "#64748b" }}>{l.bestBook}</div>
+                        <div style={{ fontSize: 9, color: "#64748b" }}>at {r.book}</div>
                       </div>
                     </div>
                   ))}
@@ -252,9 +260,11 @@ export default function HrParlaysPage() {
         {!loading && recommended.length > 0 && (
           <div style={{ marginTop: 18, padding: 12, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 10, fontSize: 12, color: "#3730a3", lineHeight: 1.55 }}>
             <strong>How these get built:</strong> we take the top +EV singles priced at ≤ {maxOdds === 9999 ? "any odds" : `+${maxOdds}`},
-            enumerate all non-correlated combinations (no two legs from the same game), filter to
-            combos that multiply to positive modeled EV, and surface the best of each size —
-            highest hit rate for the "safer" slot, best edge for "value" and "swing."
+            enumerate all non-correlated combinations (no two legs from the same game), keep only
+            combos where a <em>single sportsbook</em> actually prices every leg (so the parlay is
+            placeable — no cross-book stitching), filter to combos that multiply to positive
+            modeled EV at that book, and surface the best of each size — highest hit rate for the
+            "safer" slot, best edge for "value" and "swing."
             The model itself blends season Statcast, pitcher matchup, park factors, and live
             weather — see the <Link to="/homeruns" style={{ color: "#3730a3", fontWeight: 700 }}>HR Hunter page</Link> for per-leg diagnostics.
           </div>
