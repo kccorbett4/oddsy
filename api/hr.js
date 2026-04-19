@@ -49,8 +49,12 @@ const SAVANT_PIT_KEY = "hrctx:savant:pit:v1";
 const CTX_TTL = 1800;
 const SAVANT_TTL = 21600;
 
-async function fetchSchedule(dateStr) {
-  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateStr}`
+async function fetchSchedule(startDateStr, endDateStr) {
+  // Fetch today + tomorrow so we catch games whose probable pitchers are
+  // already announced (MLB teams announce ~24h ahead). Without this, any
+  // game starting tomorrow evening never gets matched against odds.
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1`
+    + `&startDate=${startDateStr}&endDate=${endDateStr || startDateStr}`
     + `&hydrate=probablePitcher,lineups,team,venue,person`;
   const j = await jsonFetch(url);
   const out = [];
@@ -293,6 +297,8 @@ async function handleContext(req, res) {
 
     const now = new Date();
     const todayStr = ymd(now);
+    const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+    const tomorrowStr = ymd(tomorrow);
     const season = now.getUTCFullYear();
 
     let savantBatters = {}, savantPitchers = {};
@@ -315,7 +321,7 @@ async function handleContext(req, res) {
     }
 
     const [schedule, batters, pitchers] = await Promise.all([
-      fetchSchedule(todayStr),
+      fetchSchedule(todayStr, tomorrowStr),
       fetchBatterSeasonStats(season),
       fetchPitcherSeasonStats(season),
       ...savantTasks,
@@ -398,7 +404,7 @@ async function handleContext(req, res) {
     }
 
     const payload = {
-      date: todayStr, season, games,
+      date: todayStr, tomorrowDate: tomorrowStr, season, games,
       batters, pitchers,
       savantBatters, savantPitchers,
       batterSplits, pitcherSplits,
@@ -449,7 +455,9 @@ async function handleOdds(req, res) {
     const soon = eventList.filter(e => {
       if (!e.commence_time) return false;
       const ms = new Date(e.commence_time).getTime();
-      return ms > now - 3 * 3600 * 1000 && ms < now + 36 * 3600 * 1000;
+      // Widen to 48h so tomorrow night's slate shows up — probable
+      // pitchers are announced ~24h ahead.
+      return ms > now - 3 * 3600 * 1000 && ms < now + 48 * 3600 * 1000;
     });
 
     let creditsRemaining = null;
@@ -457,8 +465,11 @@ async function handleOdds(req, res) {
     const events = [];
 
     for (const ev of soon) {
+      // regions=us,us2 picks up Fanatics, HardRock, Bally, ESPN Bet, etc.
+      // that aren't in the "us" group. Cost is same — we're billed per
+      // market, not per region.
       const oddsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/events/${ev.id}/odds`
-        + `?apiKey=${API_KEY}&regions=us&markets=batter_home_runs&oddsFormat=american`;
+        + `?apiKey=${API_KEY}&regions=us,us2&markets=batter_home_runs&oddsFormat=american`;
       const resp = await fetch(oddsUrl);
       creditsRemaining = resp.headers.get("x-requests-remaining") || creditsRemaining;
       creditsUsed = resp.headers.get("x-requests-used") || creditsUsed;
@@ -472,10 +483,15 @@ async function handleOdds(req, res) {
       // The 0.5 line is the "anytime HR" market — the only one we use for
       // the model. We keep the Over/Yes side, filter to the lowest point
       // per (player, book), and drop multi-HR tiers.
+      const bookDiag = {
+        returned: (data.bookmakers || []).map(b => b.title),
+        postingHR: [],
+      };
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
         const m = (bm.markets || []).find(x => x.key === "batter_home_runs");
         if (!m) continue;
+        bookDiag.postingHR.push(bm.title);
         for (const o of (m.outcomes || [])) {
           if (!Number.isFinite(o.price)) continue;
           if (o.name && /^(no|under)$/i.test(o.name)) continue;
@@ -510,6 +526,7 @@ async function handleOdds(req, res) {
           name,
           books: Object.values(byBook),
         })),
+        bookDiag,
       });
     }
 
