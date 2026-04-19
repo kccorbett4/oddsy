@@ -58,6 +58,8 @@ export default function ArbitragePage() {
         sportsQueried: r.sportsQueried,
         creditsRemaining: r.creditsRemaining,
         cachedAt: r.cachedAt,
+        stale: r.stale,
+        upstreamError: r.upstreamError,
       });
     } catch (e) {
       setError(e.message);
@@ -155,6 +157,15 @@ export default function ArbitragePage() {
 
       {loading && <div style={{ padding: 40, textAlign: "center", color: "#666" }}>Loading opportunities…</div>}
       {error && <div style={{ padding: 16, background: "#ffe9e9", color: "#a00", borderRadius: 8 }}>Error: {error}</div>}
+
+      {!loading && meta?.upstreamError && (
+        <div style={{
+          padding: "12px 14px", background: "#fef3c7", border: "1px solid #fcd34d",
+          color: "#92400e", borderRadius: 8, fontSize: 13, marginBottom: 12,
+        }}>
+          <b>⚠ {meta.stale ? "Showing cached data" : "Odds provider unavailable"}</b> — {meta.upstreamError}
+        </div>
+      )}
 
       {!loading && !error && sorted.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", color: "#888" }}>

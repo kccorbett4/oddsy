@@ -4,7 +4,13 @@
 //
 // 10 credits/call, so we cap the default sport list and let the
 // frontend request one sport at a time once the user picks.
+// Results are cached in Redis for 30 min; on upstream 403 (credit
+// exhaustion) we fall back to the last cached payload with stale=true.
 // Pass ?debug=1 to return the raw upstream response for shape probing.
+
+import { getRedis } from "./_redis.js";
+
+const CACHE_TTL_SECONDS = 30 * 60;
 
 const ALL_SPORTS = [
   "baseball_mlb",
@@ -58,6 +64,7 @@ export default async function handler(req, res) {
   const debug = req.query?.debug === "1";
 
   const sports = reqSport ? [reqSport] : seasonalSports();
+  const cacheKey = `arb:${sports.join(",")}:${regions}`;
 
   try {
     const results = await Promise.all(sports.map(s => fetchSportArb(s, API_KEY, regions)));
@@ -70,10 +77,16 @@ export default async function handler(req, res) {
     const opportunities = [];
     let creditsRemaining = null;
     let creditsUsed = null;
+    const upstreamErrors = [];
+    let anyOk = false;
     for (const r of results) {
       creditsRemaining = r.remaining || creditsRemaining;
       creditsUsed = r.used || creditsUsed;
-      if (!r.ok) continue;
+      if (!r.ok) {
+        upstreamErrors.push({ sport: r.sport, status: r.status, body: r.body });
+        continue;
+      }
+      anyOk = true;
       const list = Array.isArray(r.data) ? r.data
         : Array.isArray(r.data?.arbitrage) ? r.data.arbitrage
         : Array.isArray(r.data?.opportunities) ? r.data.opportunities
@@ -82,15 +95,52 @@ export default async function handler(req, res) {
       for (const item of list) opportunities.push({ sport: r.sport, ...item });
     }
 
-    res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=120");
-    return res.status(200).json({
+    const redis = await getRedis().catch(() => null);
+
+    // All upstream calls failed — serve cached data if we have it, so users
+    // see something instead of a silent empty state when credits are tapped.
+    if (!anyOk) {
+      const creditExhausted = upstreamErrors.some(e =>
+        e.status === 403 && /credit/i.test(e.body || "")
+      );
+      let stale = null;
+      if (redis) {
+        try {
+          const raw = await redis.get(cacheKey);
+          if (raw) stale = JSON.parse(raw);
+        } catch {}
+      }
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({
+        opportunities: stale?.opportunities || [],
+        sportsQueried: sports,
+        regions,
+        creditsRemaining,
+        creditsUsed,
+        stale: !!stale,
+        upstreamError: creditExhausted
+          ? "Our odds provider has temporarily cut us off (credit limit reached). Showing last cached data."
+          : "Odds provider is unreachable right now.",
+        cachedAt: stale?.cachedAt || new Date().toISOString(),
+      });
+    }
+
+    const payload = {
       opportunities,
       sportsQueried: sports,
       regions,
       creditsRemaining,
       creditsUsed,
       cachedAt: new Date().toISOString(),
-    });
+    };
+
+    // Write-through to Redis so a later credit-exhausted call can fall back.
+    if (redis) {
+      try { await redis.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(payload)); } catch {}
+    }
+
+    res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=600");
+    return res.status(200).json(payload);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

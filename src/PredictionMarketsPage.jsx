@@ -161,83 +161,121 @@ function ValueCard({ match }) {
   const { predictionMarket, book, bestBet, teams, commenceTime, sport } = match;
   const sportIcon = SPORT_ICONS[sport] || "🎯";
   const ev = bestBet.evPercent;
-  const evColor = ev >= 3 ? "#15803d" : ev >= 0 ? "#0284c7" : "#64748b";
-  const evBg = ev >= 3 ? "#dcfce7" : ev >= 0 ? "#e0f2fe" : "#f1f5f9";
+  const isPositive = ev > 0;
+  const [expanded, setExpanded] = useState(false);
+
+  const heroBg = isPositive
+    ? "linear-gradient(135deg, #15803d 0%, #16a34a 100%)"
+    : "linear-gradient(135deg, #475569 0%, #64748b 100%)";
 
   return (
     <div style={{
-      background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
-      padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+      background: "#fff", border: "1px solid #e2e5ea", borderRadius: 14,
+      boxShadow: "0 2px 6px rgba(0,0,0,0.04)", overflow: "hidden",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-        <div>
-          <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700, marginBottom: 2 }}>
-            {sportIcon} {sport} · <SourceBadge source={match.source} /> · starts {formatClose(commenceTime)}
-          </div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>
-            {teams.away} <span style={{ color: "#94a3b8" }}>@</span> {teams.home}
-          </div>
+      {/* HERO: the one thing users need to see — what to bet and where */}
+      <div style={{ background: heroBg, color: "#fff", padding: "16px 18px" }}>
+        <div style={{
+          fontSize: 10, fontWeight: 800, letterSpacing: 1.2,
+          textTransform: "uppercase", opacity: 0.9, marginBottom: 4,
+        }}>
+          {isPositive ? "✓ Place this bet" : "No edge — skip"}
         </div>
         <div style={{
-          padding: "6px 10px", borderRadius: 8, background: evBg, color: evColor,
-          fontSize: 12, fontWeight: 900, fontFamily: "'Space Mono', monospace",
-          display: "flex", flexDirection: "column", alignItems: "flex-end",
+          fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 8,
+          fontFamily: "'DM Sans', sans-serif",
         }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            {ev > 0 ? "Value bet" : ev === 0 ? "Fair" : "No edge"}
-          </span>
-          <span style={{ fontSize: 16 }}>{ev > 0 ? `+${ev.toFixed(1)}%` : `${ev.toFixed(1)}%`} EV</span>
+          Bet <span style={{ textDecoration: "underline", textDecorationThickness: 2, textUnderlineOffset: 3 }}>{bestBet.team}</span> to win
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <div style={{
+            padding: "8px 12px", background: "rgba(255,255,255,0.18)",
+            borderRadius: 8, fontSize: 13, fontWeight: 800,
+          }}>
+            at <span style={{ fontSize: 16 }}>{bestBet.book}</span>
+          </div>
+          <div style={{
+            padding: "8px 12px", background: "rgba(0,0,0,0.22)",
+            borderRadius: 8, fontSize: 16, fontWeight: 900,
+            fontFamily: "'Space Mono', monospace",
+          }}>
+            {formatOdds(bestBet.americanOdds)}
+          </div>
+          {isPositive && (
+            <div style={{
+              padding: "8px 12px", background: "#fff", color: "#15803d",
+              borderRadius: 8, fontSize: 13, fontWeight: 900,
+              fontFamily: "'Space Mono', monospace",
+            }}>
+              +{ev.toFixed(1)}% EV
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Recommendation */}
-      {ev > 0 && (
-        <div style={{
-          padding: "10px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0",
-          borderRadius: 10, marginBottom: 10,
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 900, color: "#15803d", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>
-            ✓ Recommendation
-          </div>
-          <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.4 }}>
-            Back <b>{bestBet.team}</b> at <b>{bestBet.book}</b>
-            <span style={{ fontFamily: "'Space Mono', monospace", marginLeft: 6 }}>
-              ({formatOdds(bestBet.americanOdds)})
-            </span>
-            <span style={{ color: "#15803d", fontWeight: 700, marginLeft: 6 }}>
-              +{bestBet.edgePP.toFixed(1)}pp edge
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: "#166534", marginTop: 3 }}>
-            Prediction market implies <b>{formatPct(bestBet.predProb)}</b> · book devigs to <b>{formatPct(bestBet.devigProb)}</b>.
-          </div>
+      {/* Game context strip */}
+      <div style={{
+        padding: "10px 18px", background: "#f8fafc",
+        borderBottom: "1px solid #e2e8f0", fontSize: 12,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        flexWrap: "wrap", gap: 8,
+      }}>
+        <div style={{ color: "#334155", fontWeight: 700 }}>
+          {sportIcon} {sport} · {teams.away} @ {teams.home}
+        </div>
+        <div style={{ color: "#64748b", fontSize: 11 }}>
+          starts in {formatClose(commenceTime)} · <SourceBadge source={match.source} />
+        </div>
+      </div>
+
+      {/* Why we're recommending it — plain English */}
+      {isPositive && (
+        <div style={{ padding: "12px 18px", fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
+          <b>{match.source === "kalshi" ? "Kalshi" : "Polymarket"}</b> prices {bestBet.team} to win at{" "}
+          <b style={{ color: "#15803d" }}>{formatPct(bestBet.predProb)}</b>, but <b>{bestBet.book}</b> is
+          paying out as if it's only <b style={{ color: "#b91c1c" }}>{formatPct(bestBet.devigProb)}</b>.
+          That's a <b>{bestBet.edgePP.toFixed(1)}pp</b> mispricing — the book line is soft.
         </div>
       )}
 
-      {/* Side-by-side comparison */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <SideColumn
-          label={teams.home}
-          isBest={bestBet.side === "home"}
-          pred={predictionMarket.homeProb}
-          book={book.home}
-        />
-        <SideColumn
-          label={teams.away}
-          isBest={bestBet.side === "away"}
-          pred={predictionMarket.awayProb}
-          book={book.away}
-        />
-      </div>
+      <div style={{ padding: "0 18px 14px" }}>
+        <button
+          onClick={() => setExpanded(x => !x)}
+          style={{
+            border: 0, background: "transparent", color: "#0284c7",
+            fontSize: 11, fontWeight: 800, padding: "6px 0", cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {expanded ? "Hide breakdown ▴" : "Show both sides ▾"}
+        </button>
 
-      <div style={{
-        marginTop: 10, fontSize: 10, color: "#94a3b8", display: "flex",
-        justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4,
-      }}>
-        <span>Prediction YES: {predictionMarket.yesTeam}</span>
-        <a href={match.marketUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0284c7", fontWeight: 700, textDecoration: "none" }}>
-          View on {match.source === "kalshi" ? "Kalshi" : "Polymarket"} →
-        </a>
+        {expanded && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
+              <SideColumn
+                label={teams.home}
+                isBest={bestBet.side === "home"}
+                pred={predictionMarket.homeProb}
+                book={book.home}
+              />
+              <SideColumn
+                label={teams.away}
+                isBest={bestBet.side === "away"}
+                pred={predictionMarket.awayProb}
+                book={book.away}
+              />
+            </div>
+            <div style={{
+              marginTop: 10, fontSize: 10, color: "#94a3b8",
+              display: "flex", justifyContent: "flex-end",
+            }}>
+              <a href={match.marketUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0284c7", fontWeight: 700, textDecoration: "none" }}>
+                View market on {match.source === "kalshi" ? "Kalshi" : "Polymarket"} →
+              </a>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
