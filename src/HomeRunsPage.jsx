@@ -44,6 +44,32 @@ export default function HomeRunsPage() {
   const [parlayLegs, setParlayLegs] = useState([]);
   const [wager, setWager] = useState(10);
   const [refreshing, setRefreshing] = useState(false);
+  const [roi, setRoi] = useState(null);
+
+  // Site-wide ROI banner. Aggregates across all tracked strategies so every
+  // page — including this HR tool — shows the same trust signal.
+  useEffect(() => {
+    fetch("/api/track-stats")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.stats) return;
+        let wins = 0, losses = 0, pushes = 0, total = 0, units = 0;
+        for (const s of Object.values(data.stats)) {
+          wins += s.wins || 0;
+          losses += s.losses || 0;
+          pushes += s.pushes || 0;
+          total += s.total || 0;
+          units += Number(s.units || 0);
+        }
+        if (total === 0) return;
+        setRoi({
+          wins, losses, pushes, total,
+          units: +units.toFixed(2),
+          roi: total > 0 ? +((units / total) * 100).toFixed(1) : null,
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   const loadData = async (force = false) => {
     setLoading(true);
@@ -217,6 +243,7 @@ export default function HomeRunsPage() {
       </header>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 14px 120px" }}>
+        {roi && <RoiBanner roi={roi} />}
         {/* Controls */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, alignItems: "center" }}>
           <select value={book} onChange={e => setBook(e.target.value)} style={selectStyle}>
@@ -299,7 +326,9 @@ export default function HomeRunsPage() {
                         )}
                       </div>
                       <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-                        {p.team || "?"} vs {p.opponent || "?"}
+                        {p.team && p.opponent
+                          ? `${p.team} vs ${p.opponent}`
+                          : `${p.game.away} @ ${p.game.home}`}
                         {p.opposingPitcher?.name && <> · opp {p.opposingPitcher.name} ({p.opposingPitcher.pitchHand || "?"})</>}
                         {" · "}{formatTime(p.game.commence)}
                       </div>
@@ -586,7 +615,10 @@ function DetailPanel({ pick, bvp, onBvp }) {
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {Object.values(pick.byBook).sort((a, b) => b.overDecimal - a.overDecimal).map(b => {
-            const isBest = b.book === pick.bestBook;
+            // Highlight every book tied at the highest decimal — e.g. if DK,
+            // FanDuel, and Hard Rock all post +1300, all three are "best book"
+            // and should read as green.
+            const isBest = Math.abs(b.overDecimal - pick.bestDecimal) < 0.001;
             return (
               <div key={b.book} style={{
                 fontSize: 11, padding: "4px 8px", borderRadius: 6,
@@ -610,6 +642,38 @@ function Row({ label, value }) {
       <span style={{ color: "#64748b" }}>{label}</span>
       <span style={{ color: "#1a1d23", fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{value}</span>
     </div>
+  );
+}
+
+function RoiBanner({ roi }) {
+  const r = roi.roi;
+  const color = r === null ? "#8b919a"
+    : r >= 5 ? "#0d9f4f"
+    : r >= 0 ? "#1a73e8"
+    : "#e8a100";
+  const unitsStr = (roi.units >= 0 ? "+" : "") + roi.units.toFixed(2) + "u";
+  const roiStr = r === null ? "—" : `${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
+  return (
+    <Link to="/record" style={{
+      display: "block", textDecoration: "none", color: "inherit",
+      background: `${color}08`, border: `1px solid ${color}30`,
+      borderRadius: 10, padding: "10px 14px", marginBottom: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 20, fontWeight: 900, color, fontFamily: "'Space Mono', monospace" }}>
+          {unitsStr}
+        </div>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>
+            Oddsy track record · {roiStr} ROI
+          </div>
+          <div style={{ fontSize: 10, color: "#8b919a" }}>
+            {roi.wins}W - {roi.losses}L{roi.pushes > 0 ? ` - ${roi.pushes}P` : ""} · {roi.total} picks tracked across all strategies
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color, fontWeight: 700 }}>View record →</div>
+      </div>
+    </Link>
   );
 }
 
