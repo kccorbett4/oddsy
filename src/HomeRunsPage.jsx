@@ -46,15 +46,18 @@ export default function HomeRunsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [roi, setRoi] = useState(null);
 
-  // Site-wide ROI banner. Aggregates across all tracked strategies so every
-  // page — including this HR tool — shows the same trust signal.
+  // HR-specific ROI banner. Only counts picks saved under HR strategy keys —
+  // pulling site-wide stats here is misleading since spread/moneyline picks
+  // have nothing to do with home-run performance.
   useEffect(() => {
     fetch("/api/track-stats")
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.stats) return;
+        const isHrKey = (name) => /^(hr|homerun|homeruns|home_run)(_|$)/i.test(name);
         let wins = 0, losses = 0, pushes = 0, total = 0, units = 0;
-        for (const s of Object.values(data.stats)) {
+        for (const [name, s] of Object.entries(data.stats)) {
+          if (!isHrKey(name)) continue;
           wins += s.wins || 0;
           losses += s.losses || 0;
           pushes += s.pushes || 0;
@@ -665,10 +668,10 @@ function RoiBanner({ roi }) {
         </div>
         <div style={{ flex: 1, minWidth: 140 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1d23" }}>
-            Oddsy track record · {roiStr} ROI
+            HR Hunter track record · {roiStr} ROI
           </div>
           <div style={{ fontSize: 10, color: "#8b919a" }}>
-            {roi.wins}W - {roi.losses}L{roi.pushes > 0 ? ` - ${roi.pushes}P` : ""} · {roi.total} picks tracked across all strategies
+            {roi.wins}W - {roi.losses}L{roi.pushes > 0 ? ` - ${roi.pushes}P` : ""} · {roi.total} home run picks tracked
           </div>
         </div>
         <div style={{ fontSize: 11, color, fontWeight: 700 }}>View record →</div>

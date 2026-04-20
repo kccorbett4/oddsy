@@ -623,6 +623,11 @@ const findRLMPlays = (games, liveScores) => {
 
       Object.entries(allOutcomes).forEach(([, outcomes]) => {
         if (outcomes.length < 4) return;
+        // Reject if any book has extreme odds on this outcome. Longshot futures
+        // and heavy favorites produce huge raw-odds ranges that aren't real
+        // line movement — they're just the inherent price spread on extreme
+        // lines. Keep the RLM signal to reasonably priced markets.
+        if (outcomes.some(o => isExtremeOdds(o.price))) return;
         const prices = outcomes.map(o => o.price);
         const sorted = [...prices].sort((a, b) => a - b);
         const median = sorted[Math.floor(sorted.length / 2)];
@@ -2456,7 +2461,7 @@ export default function App() {
             odds: p.bestOdds, book: p.bestBook,
             marketType: p.marketType, outcome: p.outcome, point: p.point,
             sortKey: parseFloat(p.lineRange || 0) * 5,
-            edgeLabel: `${p.lineRange} pts spread`,
+            edgeLabel: `${p.lineRange} odds spread`,
           }));
           narrativePlays.forEach(p => normalized.push({
             kind: "narrative", label: "Narrative Fade", color: "#d97706",
