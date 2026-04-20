@@ -38,11 +38,16 @@ const americanToDecimal = (a) => {
 // additively as a scraper-style supplement — the shape differs completely
 // from /odds so it needs its own parser.
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
-// `batter_home_runs_alternate` with point=0.5 is the anytime-HR yes/no prop.
-// (The un-suffixed `batter_home_runs` is season-long totals — not what we want.)
-// This one key returns DK, FanDuel, BetMGM, Fanatics, Bovada, MyBookie from
-// a single Odds API call, which replaced the scrape-each-book approach.
-const HR_MARKET_KEY = "batter_home_runs_alternate";
+// Both markets carry point=0.5 "anytime HR" outcomes, but different books
+// post to different keys:
+//   batter_home_runs_alternate: DK, FanDuel, BetMGM, Fanatics, Bovada,
+//     MyBookie, ReBet, theScore Bet (+ alternate 1.5/2.5 tiers we drop)
+//   batter_home_runs:           Hard Rock, Caesars, Bally Bet, BetRivers,
+//     betPARX, BetOnline.ag, Fliff (the "headline" anytime line only)
+// Querying both unions coverage. Dedupe is natural — same (player, book)
+// pair gets the lowest overDecimal wins when both markets return it.
+const HR_MARKET_KEYS = ["batter_home_runs", "batter_home_runs_alternate"];
+const HR_MARKET_KEY = HR_MARKET_KEYS[1]; // legacy alias for debug endpoints
 const PARLAY_API_BASE = "https://parlay-api.com/v1";
 function oddsApiKey() {
   return process.env.ODDS_API_KEY;
@@ -619,10 +624,12 @@ async function handleOdds(req, res) {
 
     for (const ev of soon) {
       // regions=us,us2 picks up Fanatics, HardRock, Bally, ESPN Bet, etc.
-      // that aren't in the "us" group. Cost is same — we're billed per
-      // market, not per region.
+      // that aren't in the "us" group. Request both HR market keys to
+      // union books that post only one or the other. Billed per (event ×
+      // market), so this doubles spend per event — acceptable on a 30-min
+      // cache.
       const oddsUrl = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
-        + `?apiKey=${API_KEY}&regions=us,us2&markets=${HR_MARKET_KEY}&oddsFormat=american`;
+        + `?apiKey=${API_KEY}&regions=us,us2&markets=${HR_MARKET_KEYS.join(",")}&oddsFormat=american`;
       const resp = await fetch(oddsUrl);
       creditsRemaining = resp.headers.get("x-requests-remaining") || creditsRemaining;
       creditsUsed = resp.headers.get("x-requests-used") || creditsUsed;
@@ -646,29 +653,30 @@ async function handleOdds(req, res) {
       const byPlayer = {};
       for (const bm of (data.bookmakers || [])) {
         if (STATE_HARDROCK.test(bm.title || "")) continue;
-        const m = (bm.markets || []).find(x => x.key === HR_MARKET_KEY);
-        if (!m) continue;
+        const hrMarkets = (bm.markets || []).filter(x => HR_MARKET_KEYS.includes(x.key));
+        if (hrMarkets.length === 0) continue;
         bookDiag.postingHR.push(bm.title);
-        for (const o of (m.outcomes || [])) {
-          if (!Number.isFinite(o.price)) continue;
-          if (o.name && /^(no|under)$/i.test(o.name)) continue;
-          const playerName = (o.description || "").trim();
-          if (!playerName) continue;
-          const point = Number.isFinite(o.point) ? o.point : 0.5;
-          if (point > 0.5) continue; // skip 1.5+ / 2.5+ tiers
-          if (!byPlayer[playerName]) byPlayer[playerName] = {};
-          const prev = byPlayer[playerName][bm.title];
-          // If multiple 0.5-equivalent lines exist for the same book,
-          // prefer the one with the lowest (most conservative) odds,
-          // which is the actual anytime-HR market.
-          const cand = {
-            book: bm.title,
-            point,
-            overAmerican: o.price,
-            overDecimal: +americanToDecimal(o.price).toFixed(3),
-          };
-          if (!prev || cand.overDecimal < prev.overDecimal) {
-            byPlayer[playerName][bm.title] = cand;
+        for (const m of hrMarkets) {
+          for (const o of (m.outcomes || [])) {
+            if (!Number.isFinite(o.price)) continue;
+            if (o.name && /^(no|under)$/i.test(o.name)) continue;
+            const playerName = (o.description || "").trim();
+            if (!playerName) continue;
+            const point = Number.isFinite(o.point) ? o.point : 0.5;
+            if (point > 0.5) continue; // skip 1.5+ / 2.5+ tiers
+            if (!byPlayer[playerName]) byPlayer[playerName] = {};
+            const prev = byPlayer[playerName][bm.title];
+            // Same book may post the 0.5 line under both market keys;
+            // keep the lowest overDecimal (most conservative).
+            const cand = {
+              book: bm.title,
+              point,
+              overAmerican: o.price,
+              overDecimal: +americanToDecimal(o.price).toFixed(3),
+            };
+            if (!prev || cand.overDecimal < prev.overDecimal) {
+              byPlayer[playerName][bm.title] = cand;
+            }
           }
         }
       }
