@@ -8,25 +8,30 @@ export const TAB_PATHS = {
   home: "/",
   picks: "/picks",
   parlays: "/parlays",
-  games: "/games",
-  hr: "/homeruns",
+  props: "/props",
   shop: "/shop",
-  arbitrage: "/arbitrage",
   markets: "/prediction-markets",
   record: "/record",
 };
 
 export function tabFromPath(pathname) {
   if (pathname === "/" || pathname === "") return "home";
+  // "Picks" umbrella absorbs arbitrage + spread-scanner + strategy-builder —
+  // they're all lenses on "find me a +EV bet".
   if (pathname.startsWith("/picks")) return "picks";
+  if (pathname.startsWith("/arbitrage")) return "picks";
+  if (pathname.startsWith("/spread-scanner")) return "picks";
+  if (pathname.startsWith("/strategy-builder")) return "picks";
+  // "Parlays" umbrella absorbs HR parlays.
   if (pathname.startsWith("/parlays")) return "parlays";
+  if (pathname.startsWith("/homeruns/parlays")) return "parlays";
+  // "Props" umbrella — HR today, expansion-ready.
+  if (pathname.startsWith("/props")) return "props";
+  if (pathname.startsWith("/homeruns")) return "props";
   if (pathname.startsWith("/games")) return "games";
-  if (pathname.startsWith("/homeruns")) return "hr";
   if (pathname.startsWith("/shop")) return "shop";
-  if (pathname.startsWith("/arbitrage")) return "arbitrage";
   if (pathname.startsWith("/prediction-markets")) return "markets";
   if (pathname.startsWith("/record")) return "record";
-  if (pathname.startsWith("/strategy-builder")) return "strategy";
   return "home";
 }
 
@@ -34,10 +39,8 @@ const DESKTOP_TABS = [
   { id: "home", path: "/", label: "Home", icon: "🏠" },
   { id: "picks", path: "/picks", label: "Picks", icon: "💰" },
   { id: "parlays", path: "/parlays", label: "Parlays", icon: "🎰" },
-  { id: "games", path: "/games", label: "Games", icon: "📊" },
-  { id: "hr", path: "/homeruns", label: "HR", icon: "💣" },
+  { id: "props", path: "/props", label: "Props", icon: "💣" },
   { id: "shop", path: "/shop", label: "Shop", icon: "🏦" },
-  { id: "arbitrage", path: "/arbitrage", label: "Arbitrage", icon: "🔄" },
   { id: "markets", path: "/prediction-markets", label: "Markets", icon: "🔮" },
   { id: "record", path: "/record", label: "Record", icon: "📈" },
 ];
@@ -47,18 +50,20 @@ const MOBILE_TABS = [
   { id: "home", path: "/", label: "Home", icon: "🏠" },
   { id: "picks", path: "/picks", label: "Picks", icon: "💰" },
   { id: "parlays", path: "/parlays", label: "Parlays", icon: "🎰" },
-  { id: "games", path: "/games", label: "Games", icon: "📊" },
+  { id: "props", path: "/props", label: "Props", icon: "💣" },
   { id: "more", label: "More", icon: "➕" },
 ];
 
+// Drawer on mobile (and "everything not in desktop tabs" on desktop too).
+// Every page is still one tap away — nothing is orphaned on the home page.
 const MORE_ITEMS = [
-  { path: "/homeruns", label: "HR Hunter", icon: "💣", desc: "Top home run props" },
-  { path: "/shop", label: "Book Shop", icon: "🏦", desc: "Compare live odds" },
-  { path: "/spread-scanner", label: "Odds Gap Scanner", icon: "📊", desc: "Median vs best across books" },
-  { path: "/arbitrage", label: "Arbitrage", icon: "🔄", desc: "Guaranteed-profit bets" },
-  { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi vs books — find value" },
-  { path: "/strategy-builder", label: "Build Your Own", icon: "🛠️", desc: "Custom pick filters" },
+  { path: "/shop", label: "Book Shop", icon: "🏦", desc: "Compare live odds side by side" },
+  { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi vs books" },
   { path: "/record", label: "Track Record", icon: "📈", desc: "Historical performance" },
+  { path: "/games", label: "Game Board", icon: "📊", desc: "Every game, every market" },
+  { path: "/arbitrage", label: "Arbitrage", icon: "🔄", desc: "Guaranteed-profit bets" },
+  { path: "/spread-scanner", label: "Odds Gap Scanner", icon: "📊", desc: "Median vs best across books" },
+  { path: "/strategy-builder", label: "Custom Strategy", icon: "🛠️", desc: "Build your own pick filter" },
 ];
 
 export default function SiteNav() {
@@ -76,10 +81,10 @@ export default function SiteNav() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Highlight "More" when the current route is one of the drawer destinations.
-  const mobileActive = MORE_ITEMS.some(m => location.pathname.startsWith(m.path))
-    ? "more"
-    : active;
+  // "More" lights up whenever the active tab id isn't one of the five
+  // primary mobile slots — covers drawer destinations and umbrella-member
+  // pages (e.g. /arbitrage maps to Picks, but /shop has no primary tab).
+  const mobileActive = MOBILE_TABS.some(t => t.id === active) ? active : "more";
 
   return (
     <>

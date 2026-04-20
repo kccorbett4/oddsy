@@ -38,9 +38,15 @@ export default function AppRoutes() {
       {/* Interactive book shop — live odds side by side */}
       <Route path="/shop" element={<ShopPage />} />
 
-      {/* Home run prop hunter */}
+      {/* Player prop hunter — /props is canonical, /homeruns kept for
+          back-compat since users may have bookmarks and the sitemap ships it. */}
+      <Route path="/props" element={<HomeRunsPage />} />
+      <Route path="/props/hr" element={<HomeRunsPage />} />
+      <Route path="/props/parlays" element={<HrParlaysPage />} />
       <Route path="/homeruns" element={<HomeRunsPage />} />
       <Route path="/homeruns/parlays" element={<HrParlaysPage />} />
+      {/* Parlays umbrella — HR parlays reachable from the primary Parlays tab. */}
+      <Route path="/parlays/hr" element={<HrParlaysPage />} />
 
       {/* Arbitrage finder */}
       <Route path="/arbitrage" element={<ArbitragePage />} />

@@ -2586,6 +2586,28 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {/* Sibling tools — same "find a +EV bet" workflow, but they
+                    live on their own pages because the UI is different enough
+                    to not belong in the main picks list. Rendered as outlined
+                    chips with an arrow so it's clear they navigate away. */}
+                <div style={{ width: 1, background: "#e2e5ea", margin: "4px 4px", flexShrink: 0 }} />
+                {[
+                  { path: "/arbitrage", label: "🔄 Arbitrage", color: "#059669" },
+                  { path: "/spread-scanner", label: "📊 Gaps", color: "#7c3aed" },
+                  { path: "/strategy-builder", label: "🛠️ Custom", color: "#1a73e8" },
+                ].map(link => (
+                  <Link key={link.path} to={link.path} style={{
+                    display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
+                    padding: "8px 12px", borderRadius: 20,
+                    border: `1px dashed ${link.color}`, background: "#fff",
+                    color: link.color, fontSize: 12, fontWeight: 700,
+                    textDecoration: "none", whiteSpace: "nowrap",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    {link.label} <span style={{ fontSize: 11, opacity: 0.7 }}>→</span>
+                  </Link>
+                ))}
               </div>
 
               {pickInfoOpen && chipInfo[pickInfoOpen] && (
@@ -2818,19 +2840,19 @@ export default function App() {
 
 
 
-        {/* ── PARLAYS TAB (with sub-toggle for Safe vs. Correlated) ── */}
+        {/* ── PARLAYS TAB (sub-toggle for Safe / Same-Game / Analyze + HR link) ── */}
         {activeTab === "parlays" && (
           <div style={{
             display: "flex", gap: 4, background: "#f0f1f3", borderRadius: 10,
-            padding: 4, marginBottom: 14, maxWidth: 380,
+            padding: 4, marginBottom: 14, maxWidth: 520, flexWrap: "wrap",
           }}>
             {[
-              { id: "safe", label: "🎰 Safe Parlays" },
+              { id: "safe", label: "🎰 Safe" },
               { id: "correlated", label: "🔗 Same-Game" },
               { id: "analyze", label: "🔬 Analyze" },
             ].map(s => (
               <button key={s.id} onClick={() => setParlaySub(s.id)} style={{
-                flex: 1, padding: "8px 12px", borderRadius: 8, border: "none",
+                flex: 1, minWidth: 90, padding: "8px 12px", borderRadius: 8, border: "none",
                 background: parlaySub === s.id ? "#fff" : "transparent",
                 color: parlaySub === s.id ? "#7c3aed" : "#6b7280",
                 fontSize: 12, fontWeight: 700, cursor: "pointer",
@@ -2838,6 +2860,15 @@ export default function App() {
                 boxShadow: parlaySub === s.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               }}>{s.label}</button>
             ))}
+            {/* HR parlays live on their own page because they need player/prop
+                data the game-market parlay builder doesn't load. Styled the
+                same as the other toggles so it reads as part of the group. */}
+            <Link to="/parlays/hr" style={{
+              flex: 1, minWidth: 90, padding: "8px 12px", borderRadius: 8, border: "none",
+              background: "transparent", color: "#6b7280",
+              fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center",
+              fontFamily: "'DM Sans', sans-serif", textDecoration: "none",
+            }}>💣 HR</Link>
           </div>
         )}
 

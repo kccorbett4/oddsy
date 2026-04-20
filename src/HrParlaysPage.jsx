@@ -103,6 +103,27 @@ export default function HrParlaysPage() {
       </header>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 14px 110px" }}>
+        {/* Parlay family switcher — jump back to game parlays (where the
+            three sub-views — Safe/Same-Game/Analyze — live) or stay here. */}
+        <div style={{
+          display: "flex", gap: 4, background: "#f0f1f3", borderRadius: 10,
+          padding: 4, marginBottom: 14, maxWidth: 320,
+        }}>
+          <Link to="/parlays" style={{
+            flex: 1, padding: "8px 12px", borderRadius: 8,
+            background: "transparent", color: "#6b7280",
+            fontSize: 12, fontWeight: 700, textAlign: "center",
+            fontFamily: "'DM Sans', sans-serif", textDecoration: "none",
+          }}>🎰 Game Parlays</Link>
+          <div style={{
+            flex: 1, padding: "8px 12px", borderRadius: 8,
+            background: "#fff", color: "#7c3aed",
+            fontSize: 12, fontWeight: 700, textAlign: "center",
+            fontFamily: "'DM Sans', sans-serif",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          }}>💣 HR Parlays</div>
+        </div>
+
         {/* Controls */}
         <div style={{
           background: "#fff", border: "1px solid #e2e5ea", borderRadius: 12,
