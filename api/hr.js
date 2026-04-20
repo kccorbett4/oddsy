@@ -38,7 +38,11 @@ const americanToDecimal = (a) => {
 // additively as a scraper-style supplement — the shape differs completely
 // from /odds so it needs its own parser.
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
-const HR_MARKET_KEY = "batter_home_runs";
+// `batter_home_runs_alternate` with point=0.5 is the anytime-HR yes/no prop.
+// (The un-suffixed `batter_home_runs` is season-long totals — not what we want.)
+// This one key returns DK, FanDuel, BetMGM, Fanatics, Bovada, MyBookie from
+// a single Odds API call, which replaced the scrape-each-book approach.
+const HR_MARKET_KEY = "batter_home_runs_alternate";
 const PARLAY_API_BASE = "https://parlay-api.com/v1";
 function oddsApiKey() {
   return process.env.ODDS_API_KEY;
@@ -683,40 +687,44 @@ async function handleOdds(req, res) {
       });
     }
 
-    // Supplement Odds API with DK/FanDuel scrape. Cached separately so a
-    // flaky sportsbook endpoint doesn't invalidate the main odds cache.
+    // Scraper supplement is dormant by default — `batter_home_runs_alternate`
+    // from the Odds API already returns DK/FD/BetMGM/Fanatics/Bovada/MyBookie.
+    // Flip HR_SCRAPERS_ENABLED=1 if the Odds API ever drops a book and we
+    // need to resurrect the DK/FD/Bovada scrape path.
+    const scrapersEnabled = process.env.HR_SCRAPERS_ENABLED === "1";
     let scraped = null;
-    if (redis && !force) {
-      try {
-        const c = await redis.get(SCRAPE_KEY);
-        if (c) scraped = JSON.parse(c);
-      } catch {}
-    }
-    if (!scraped) {
-      try { scraped = await fetchScrapedHr(); }
-      catch (e) {
-        scraped = {
-          draftkings: { ok: false, error: e.message, events: [] },
-          fanduel: { ok: false, error: e.message, events: [] },
-          bovada: { ok: false, error: e.message, events: [] },
-        };
-      }
-      if (redis) {
-        try { await redis.set(SCRAPE_KEY, JSON.stringify(scraped), { EX: SCRAPE_TTL }); } catch {}
-      }
-    }
-
     let dkResult = { attached: 0, skippedAmbiguous: 0 };
     let fdResult = { attached: 0, skippedAmbiguous: 0 };
     let bvResult = { attached: 0, skippedAmbiguous: 0 };
-    if (scraped?.draftkings?.ok) {
-      dkResult = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
-    }
-    if (scraped?.fanduel?.ok) {
-      fdResult = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
-    }
-    if (scraped?.bovada?.ok) {
-      bvResult = mergeScrapedIntoEvents(events, scraped.bovada, "Bovada");
+    if (scrapersEnabled) {
+      if (redis && !force) {
+        try {
+          const c = await redis.get(SCRAPE_KEY);
+          if (c) scraped = JSON.parse(c);
+        } catch {}
+      }
+      if (!scraped) {
+        try { scraped = await fetchScrapedHr(); }
+        catch (e) {
+          scraped = {
+            draftkings: { ok: false, error: e.message, events: [] },
+            fanduel: { ok: false, error: e.message, events: [] },
+            bovada: { ok: false, error: e.message, events: [] },
+          };
+        }
+        if (redis) {
+          try { await redis.set(SCRAPE_KEY, JSON.stringify(scraped), { EX: SCRAPE_TTL }); } catch {}
+        }
+      }
+      if (scraped?.draftkings?.ok) {
+        dkResult = mergeScrapedIntoEvents(events, scraped.draftkings, "DraftKings");
+      }
+      if (scraped?.fanduel?.ok) {
+        fdResult = mergeScrapedIntoEvents(events, scraped.fanduel, "FanDuel");
+      }
+      if (scraped?.bovada?.ok) {
+        bvResult = mergeScrapedIntoEvents(events, scraped.bovada, "Bovada");
+      }
     }
 
     // Parlay-api /props: Bet365 + DFS (Underdog/Fliff). Cached separately
@@ -747,13 +755,13 @@ async function handleOdds(req, res) {
       scrapers: {
         draftkings: scraped?.draftkings?.ok
           ? { ok: true, eventCount: scraped.draftkings.eventCount, ...dkResult }
-          : { ok: false, error: scraped?.draftkings?.error || "unknown", attached: 0 },
+          : { ok: false, error: scrapersEnabled ? (scraped?.draftkings?.error || "unknown") : "disabled", attached: 0 },
         fanduel: scraped?.fanduel?.ok
           ? { ok: true, eventCount: scraped.fanduel.eventCount, ...fdResult }
-          : { ok: false, error: scraped?.fanduel?.error || "unknown", attached: 0 },
+          : { ok: false, error: scrapersEnabled ? (scraped?.fanduel?.error || "unknown") : "disabled", attached: 0 },
         bovada: scraped?.bovada?.ok
           ? { ok: true, eventCount: scraped.bovada.eventCount, ...bvResult }
-          : { ok: false, error: scraped?.bovada?.error || "unknown", attached: 0 },
+          : { ok: false, error: scrapersEnabled ? (scraped?.bovada?.error || "unknown") : "disabled", attached: 0 },
         parlayApi: parlay?.ok
           ? { ok: true, eventCount: parlay.eventCount, rowCount: parlay.rowCount, ...parlayResult }
           : { ok: false, error: parlay?.error || "unknown", attached: 0 },
