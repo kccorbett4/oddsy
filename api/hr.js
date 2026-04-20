@@ -1075,6 +1075,7 @@ async function handleDebugHrBooks(req, res) {
   const booksParam = (req.query?.bookmakers || "draftkings,fanduel,betmgm,fanatics").toString();
   const regions = (req.query?.regions || "us,us2").toString();
   const maxEvents = Math.max(1, Math.min(5, parseInt(req.query?.maxEvents, 10) || 3));
+  const marketKey = (req.query?.market || HR_MARKET_KEY).toString();
 
   const evList = await jsonFetch(`${ODDS_BASE}/sports/baseball_mlb/events?apiKey=${API_KEY}`);
   if (!Array.isArray(evList)) return res.status(502).json({ error: "events list fetch failed" });
@@ -1090,7 +1091,7 @@ async function handleDebugHrBooks(req, res) {
     // Test 1: with explicit bookmakers filter
     const u1 = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
       + `?apiKey=${API_KEY}&regions=${regions}&bookmakers=${booksParam}`
-      + `&markets=${HR_MARKET_KEY}&oddsFormat=american`;
+      + `&markets=${marketKey}&oddsFormat=american`;
     const r1 = await fetch(u1);
     lastRemaining = r1.headers.get("x-requests-remaining") || lastRemaining;
     const j1 = r1.ok ? await r1.json() : { error: `${r1.status} ${await r1.text()}` };
@@ -1098,7 +1099,7 @@ async function handleDebugHrBooks(req, res) {
     // Test 2: without bookmakers filter (baseline)
     const u2 = `${ODDS_BASE}/sports/baseball_mlb/events/${ev.id}/odds`
       + `?apiKey=${API_KEY}&regions=${regions}`
-      + `&markets=${HR_MARKET_KEY}&oddsFormat=american`;
+      + `&markets=${marketKey}&oddsFormat=american`;
     const r2 = await fetch(u2);
     lastRemaining = r2.headers.get("x-requests-remaining") || lastRemaining;
     const j2 = r2.ok ? await r2.json() : { error: `${r2.status} ${await r2.text()}` };
@@ -1106,7 +1107,7 @@ async function handleDebugHrBooks(req, res) {
     const summarize = (j) => {
       if (j?.error) return { error: j.error };
       const books = (j.bookmakers || []).map(b => {
-        const mkt = (b.markets || []).find(m => m.key === HR_MARKET_KEY);
+        const mkt = (b.markets || []).find(m => m.key === marketKey);
         const outcomes = mkt?.outcomes || [];
         return {
           title: b.title,
@@ -1129,7 +1130,7 @@ async function handleDebugHrBooks(req, res) {
   }
 
   return res.status(200).json({
-    probedMarket: HR_MARKET_KEY,
+    probedMarket: marketKey,
     regions,
     bookmakersRequested: booksParam,
     creditsRemaining: lastRemaining,
