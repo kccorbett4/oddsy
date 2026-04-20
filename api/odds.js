@@ -136,20 +136,15 @@ export default async function handler(req, res) {
     if (month >= 7 || month === 0) sports.push("americanfootball_ncaaf");
     if (month >= 10 || month <= 3) sports.push("basketball_ncaab");
     if (month >= 1 && month <= 10) sports.push("soccer_usa_mls");
-    // European soccer runs Aug–May.
+    // Soccer: US-popular only. Premier League + UEFA tournaments run Aug–May;
+    // those are the ones Americans actually watch. Skipping La Liga / Serie A
+    // / Bundesliga / Ligue 1 / Liga MX / South American leagues — they burn
+    // credits without adding slate value for this audience.
     if (month >= 7 || month <= 4) {
       sports.push("soccer_epl");
-      sports.push("soccer_spain_la_liga");
-      sports.push("soccer_italy_serie_a");
-      sports.push("soccer_germany_bundesliga");
-      sports.push("soccer_france_ligue_one");
       sports.push("soccer_uefa_champs_league");
       sports.push("soccer_uefa_europa_league");
     }
-    // South American + international summer soccer to cover the NH offseason.
-    if (month >= 2 && month <= 10) sports.push("soccer_brazil_campeonato");
-    if (month >= 2 && month <= 10) sports.push("soccer_argentina_primera_division");
-    if (month >= 2 && month <= 10) sports.push("soccer_mexico_ligamx");
     // Year-round combat sports + golf + tennis (major tours).
     sports.push("mma_mixed_martial_arts");
     sports.push("boxing_boxing");
