@@ -16,6 +16,7 @@ import HomeRunsPage from './HomeRunsPage.jsx'
 import HrParlaysPage from './HrParlaysPage.jsx'
 import ArbitragePage from './ArbitragePage.jsx'
 import PredictionMarketsPage from './PredictionMarketsPage.jsx'
+import SpreadScannerPage from './SpreadScannerPage.jsx'
 
 export default function AppRoutes() {
   return (
@@ -46,6 +47,9 @@ export default function AppRoutes() {
 
       {/* Kalshi + Polymarket prediction markets */}
       <Route path="/prediction-markets" element={<PredictionMarketsPage />} />
+
+      {/* Spread scanner — median vs best across books */}
+      <Route path="/spread-scanner" element={<SpreadScannerPage />} />
 
       {/* SEO landing pages */}
       <Route path="/ev-betting" element={<EvBettingPage />} />

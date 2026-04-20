@@ -54,6 +54,7 @@ const MOBILE_TABS = [
 const MORE_ITEMS = [
   { path: "/homeruns", label: "HR Hunter", icon: "💣", desc: "Top home run props" },
   { path: "/shop", label: "Book Shop", icon: "🏦", desc: "Compare live odds" },
+  { path: "/spread-scanner", label: "Odds Gap Scanner", icon: "📊", desc: "Median vs best across books" },
   { path: "/arbitrage", label: "Arbitrage", icon: "🔄", desc: "Guaranteed-profit bets" },
   { path: "/prediction-markets", label: "Prediction Markets", icon: "🔮", desc: "Kalshi vs books — find value" },
   { path: "/strategy-builder", label: "Build Your Own", icon: "🛠️", desc: "Custom pick filters" },
