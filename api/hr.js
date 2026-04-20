@@ -1105,11 +1105,17 @@ async function handleDebugHrBooks(req, res) {
 
     const summarize = (j) => {
       if (j?.error) return { error: j.error };
-      const books = (j.bookmakers || []).map(b => ({
-        title: b.title,
-        hasHrMarket: (b.markets || []).some(m => m.key === HR_MARKET_KEY),
-        hrOutcomeCount: (b.markets || []).find(m => m.key === HR_MARKET_KEY)?.outcomes?.length || 0,
-      }));
+      const books = (j.bookmakers || []).map(b => {
+        const mkt = (b.markets || []).find(m => m.key === HR_MARKET_KEY);
+        const outcomes = mkt?.outcomes || [];
+        return {
+          title: b.title,
+          hasHrMarket: !!mkt,
+          hrOutcomeCount: outcomes.length,
+          samplePoints: [...new Set(outcomes.map(o => o.point).filter(p => p !== undefined))].slice(0, 6),
+          sampleOutcomes: outcomes.slice(0, 3).map(o => ({ name: o.name, description: o.description, point: o.point, price: o.price })),
+        };
+      });
       return { bookCount: books.length, books };
     };
 
