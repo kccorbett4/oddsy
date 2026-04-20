@@ -54,6 +54,70 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Static SEO/LLM fallback. Non-JS crawlers (Bing, DDG, social previews,
+      most LLM scrapers) see this instead of an empty <div id="root">.
+      The CSS rule below hides it the instant React puts anything in #root,
+      so real users never see it. If JS is disabled, it stays visible —
+      which is the correct fallback experience.
+    -->
+    <style>
+      #root:not(:empty) ~ #seo-fallback { display: none; }
+      #seo-fallback { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; line-height: 1.55; }
+      #seo-fallback h1 { font-size: 2rem; margin: 0 0 .5rem; }
+      #seo-fallback .tagline { font-size: 1.1rem; color: #555; margin: 0 0 2rem; }
+      #seo-fallback h2 { font-size: 1.25rem; margin: 1.75rem 0 .75rem; }
+      #seo-fallback .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+      #seo-fallback .card { border: 1px solid #e4e4e4; border-radius: 8px; padding: 1rem; text-decoration: none; color: inherit; }
+      #seo-fallback .card strong { display: block; margin-bottom: .25rem; color: #0d9f4f; }
+      #seo-fallback ul { padding-left: 1.25rem; }
+    </style>
+    <div id="seo-fallback">
+      <header>
+        <h1>MyOddsy — Find +EV Bets &amp; Compare Live Sportsbook Odds</h1>
+        <p class="tagline">Sharp-tools sports betting intelligence across 21 US sportsbooks. Real-time +EV detection, vig-free fair-value modeling, and cross-book arbitrage — built for bettors who want an edge, not a guess.</p>
+      </header>
+      <main>
+        <h2>What MyOddsy does</h2>
+        <ul>
+          <li><strong>Positive expected value (+EV) picks</strong> — every market is compared to a Pinnacle-anchored vig-free median so you see only bets with a real mathematical edge.</li>
+          <li><strong>Odds comparison across 21 US books</strong> — DraftKings, FanDuel, BetMGM, Caesars, BetRivers, Fanatics, ESPN BET, Hard Rock, Bally Bet, BetParX, William Hill US, Fliff, Rebet, Bovada, BetOnline, MyBookie, BetUS, LowVig, BetAnySports, GTBets, Everygame.</li>
+          <li><strong>Sharp play detector</strong> — composite scoring combines market discrepancy, EV strength, consensus divergence and underdog value into a 0-100 confidence score.</li>
+          <li><strong>Arbitrage finder</strong> — scans every bettable book pair for guaranteed-profit price mismatches across moneylines, totals, and spreads.</li>
+          <li><strong>Home-run &amp; player props</strong> — Statcast-backed MLB HR prop scanner with book-by-book best price.</li>
+          <li><strong>Correlated parlays</strong> — flags same-game parlay legs that logically pair (favorite + over, underdog + under) with EV calculated per leg.</li>
+          <li><strong>Reverse line movement &amp; stale lines</strong> — detect books lagging behind sharp consensus so you can grab the old number before it moves.</li>
+          <li><strong>Strategy builder</strong> — define your own scoring rules and backtest against the live slate.</li>
+        </ul>
+        <h2>Explore the tools</h2>
+        <div class="grid">
+          <a class="card" href="/picks"><strong>+EV Picks</strong>Top-scoring value bets, ranked by EV and edge.</a>
+          <a class="card" href="/parlays"><strong>Parlay Builder</strong>Cross-sport and same-game parlays with EV per leg.</a>
+          <a class="card" href="/shop"><strong>Odds Shop</strong>Side-by-side book comparison for every market.</a>
+          <a class="card" href="/arbitrage"><strong>Arbitrage Finder</strong>Guaranteed-profit mismatches across US books.</a>
+          <a class="card" href="/spread-scanner"><strong>Gap Scanner</strong>Biggest price gaps between best book and market median.</a>
+          <a class="card" href="/props"><strong>Home Run Props</strong>MLB HR prop scanner with Statcast context.</a>
+          <a class="card" href="/props/parlays"><strong>HR Parlays</strong>Multi-leg home-run prop parlays with combined EV.</a>
+          <a class="card" href="/prediction-markets"><strong>Prediction Markets</strong>Kalshi and Polymarket event pricing.</a>
+          <a class="card" href="/strategy-builder"><strong>Strategy Builder</strong>Define custom scoring rules for your own edge.</a>
+          <a class="card" href="/record"><strong>Track Record</strong>Historical ROI across every strategy we ship.</a>
+        </div>
+        <h2>Learn the concepts</h2>
+        <div class="grid">
+          <a class="card" href="/ev-betting"><strong>What is +EV Betting?</strong>How expected-value math separates sharps from squares.</a>
+          <a class="card" href="/odds-comparison"><strong>Why Line Shopping Matters</strong>A half-point can flip a losing season into a winning one.</a>
+          <a class="card" href="/parlay-calculator"><strong>Parlay Calculator</strong>True combined odds, implied probability, and EV.</a>
+          <a class="card" href="/sharp-betting"><strong>Sharp Betting Guide</strong>Spotting sharp money and closing-line value (CLV).</a>
+          <a class="card" href="/reverse-line-movement"><strong>Reverse Line Movement</strong>When books move against public money.</a>
+          <a class="card" href="/correlated-parlays"><strong>Correlated Parlays</strong>Legs that logically depend on each other.</a>
+          <a class="card" href="/stale-line-detector"><strong>Stale Line Detector</strong>Find books slow to move with the market.</a>
+          <a class="card" href="/narrative-regression"><strong>Narrative Regression</strong>Fade overreactions to recent blowouts.</a>
+        </div>
+      </main>
+      <noscript>
+        <p><strong>JavaScript is required for the live betting tools.</strong> All the content above is still readable without JS — enable JavaScript to load real-time odds.</p>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
