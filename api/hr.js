@@ -1144,6 +1144,7 @@ async function handleDebugScrapers(req, res) {
     return {
       ok: true,
       eventCount: result.eventCount,
+      ...(result.skipped ? { skipped: result.skipped } : {}),
       events: (result.events || []).map(ev => ({
         home: ev.home, away: ev.away,
         playerCount: ev.players?.length || 0,

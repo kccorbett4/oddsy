@@ -236,9 +236,15 @@ async function scrapeFanDuel() {
 // so name matching against Odds-API events works.
 async function scrapeBovada() {
   const base = "https://www.bovada.lv/services/sports/event/coupon/events/A/description";
-  // Drop marketFilterId=def (restricts to "default" markets — strips HR props
-  // from per-event responses) and preMatchOnly=true (was limiting the listing
-  // to the next 1–2 games). With both flags off we see the full MLB slate.
+  // KNOWN BUG (2026-04-19): per-event detail calls to
+  //   ${base}/baseball/mlb/<slug>?lang=en
+  // now return an empty array `[]` even with full browser headers. The listing
+  // still returns all 8 MLB games with game-lines markets, but HR props only
+  // appear in the per-event detail response — which upstream has either moved
+  // or been geofenced. Until we identify the new detail endpoint (inspect
+  // DevTools on bovada.lv while loading a game page), HR props from Bovada
+  // will be missing. The scraper still runs so it picks up any events whose
+  // detail does resolve, and degrades gracefully when none do.
   const listUrl = `${base}/baseball/mlb?eventsLimit=50&lang=en`;
   const list = await jfetch(listUrl);
 
