@@ -1112,17 +1112,19 @@ async function handleDebugHrBooks(req, res) {
     lastRemaining = r2.headers.get("x-requests-remaining") || lastRemaining;
     const j2 = r2.ok ? await r2.json() : { error: `${r2.status} ${await r2.text()}` };
 
+    const requestedKeys = marketKey.split(",");
     const summarize = (j) => {
       if (j?.error) return { error: j.error };
       const books = (j.bookmakers || []).map(b => {
-        const mkt = (b.markets || []).find(m => m.key === marketKey);
-        const outcomes = mkt?.outcomes || [];
+        const hrMarkets = (b.markets || []).filter(m => requestedKeys.includes(m.key));
+        const allOutcomes = hrMarkets.flatMap(m => m.outcomes || []);
         return {
           title: b.title,
-          hasHrMarket: !!mkt,
-          hrOutcomeCount: outcomes.length,
-          samplePoints: [...new Set(outcomes.map(o => o.point).filter(p => p !== undefined))].slice(0, 6),
-          sampleOutcomes: outcomes.slice(0, 3).map(o => ({ name: o.name, description: o.description, point: o.point, price: o.price })),
+          marketKeys: (b.markets || []).map(m => m.key),
+          hasHrMarket: hrMarkets.length > 0,
+          hrOutcomeCount: allOutcomes.length,
+          samplePoints: [...new Set(allOutcomes.map(o => o.point).filter(p => p !== undefined))].slice(0, 6),
+          sampleOutcomes: allOutcomes.slice(0, 3).map(o => ({ name: o.name, description: o.description, point: o.point, price: o.price })),
         };
       });
       return { bookCount: books.length, books };
