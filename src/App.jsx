@@ -452,20 +452,20 @@ const findSharpPlays = (games, liveScores) => {
           const maxDev = Math.max(...prices) - Math.min(...prices);
           const discrepancyScore = maxDev > 0 ? Math.min(30, (deviation / maxDev) * 30) : 0;
 
-          // ── FACTOR 2: Underdog Value (0-25 pts) ──
-          // Sports Insights (2007-2023): NFL underdogs receiving <20% of public
-          // bets cover 57.1% ATS with +12.8% ROI. Underdogs are systematically
-          // undervalued across all major sports.
+          // ── FACTOR 2: Underdog Value (0-15 pts) ──
+          // Underdogs are systematically undervalued, but we don't want the
+          // score to be dominated by longshots — cap this tighter than EV so
+          // a +110 play with 8% EV outranks a +400 play with 2% EV.
           let underdogScore = 0;
           if (marketType === "h2h" && outcome.price > 100) {
-            underdogScore = Math.min(25, (outcome.price - 100) / 200 * 25);
-            // Home underdog bonus — Bet Labs: NFL divisional home underdogs
-            // covered 71% ATS from 2003-2023
+            // Full 15 pts requires +400 or more; linear below that.
+            underdogScore = Math.min(15, (outcome.price - 100) / 300 * 15);
+            // Home-underdog nudge kept but lighter — 1.2× not 1.4×.
             const isHome = outcome.name === game.home_team;
-            if (isHome) underdogScore = Math.min(25, underdogScore * 1.4);
+            if (isHome) underdogScore = Math.min(15, underdogScore * 1.2);
           }
           if (marketType === "spreads" && outcome.point && outcome.point > 0) {
-            underdogScore = Math.min(20, outcome.point / 10 * 20);
+            underdogScore = Math.min(12, outcome.point / 10 * 12);
           }
 
           // ── FACTOR 3: Market Consensus Divergence (0-25 pts) ──
@@ -481,9 +481,10 @@ const findSharpPlays = (games, liveScores) => {
             ? Math.min(25, consensusRatio * 25)
             : 0;
 
-          // ── FACTOR 4: EV Strength (0-20 pts) ──
-          // Direct scaling of expected value — the core mathematical edge.
-          const evScore = Math.min(20, (ev / 10) * 20);
+          // ── FACTOR 4: EV Strength (0-30 pts) ──
+          // Bumped from 20 → 30 so the real mathematical edge carries more
+          // weight than raw underdog odds. Full 30 pts at 10% EV.
+          const evScore = Math.min(30, (ev / 10) * 30);
 
           const totalScore = discrepancyScore + underdogScore + divergenceScore + evScore;
 
@@ -663,7 +664,9 @@ const findCorrelatedParlays = (games, liveScores) => {
   const correlated = [];
   games.forEach(game => {
     const status = getGameStatus(game, liveScores);
-    if (status === "final" || status === "blowout" || status === "in_progress") return;
+    // live_unknown = commence time passed but no live feed — almost always a
+    // game that finished without scores reaching us. Treat as over.
+    if (status === "final" || status === "blowout" || status === "in_progress" || status === "live_unknown") return;
 
     const getMarketOutcomes = (marketType) => {
       const outcomes = {};
