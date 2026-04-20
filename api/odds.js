@@ -25,10 +25,9 @@ export default async function handler(req, res) {
   }
 
   const markets = req.query.markets || "h2h,spreads,totals";
-  // US books only: us + us2 covers DK, FD, BetMGM, Caesars, BetRivers,
-  // Fanatics, Hard Rock, ESPN Bet, PrizePicks, Underdog, Kalshi, Polymarket.
-  // Override via ?regions= to reach UK/EU/AU books at 2.5× the credit cost.
-  const regions = req.query.regions || "us,us2";
+  // us+us2 = US retail; eu adds Pinnacle (sharp anchor for fair-value math).
+  // EU books aren't bettable by US users, but their prices sharpen the median.
+  const regions = req.query.regions || "us,us2,eu";
   const oddsFormat = "american";
 
   // Curated list of the most popular US-market sports. Seasonal filter
@@ -84,9 +83,21 @@ export default async function handler(req, res) {
     const STATE_SPECIFIC_BOOKS = new Set([
       "hardrockbet_az", "hardrockbet_fl", "hardrockbet_oh",
     ]);
+    // Books US bettors can actually place wagers at. Regulated retail + a few
+    // offshore/sweepstakes books that accept US deposits. Everything outside
+    // this set (Pinnacle, 1xBet, UK/EU retail) is kept for fair-value math
+    // but hidden from "place this bet" links.
+    const US_BETTABLE_BOOKS = new Set([
+      "draftkings", "fanduel", "betmgm", "caesars", "betrivers", "fanatics",
+      "hardrockbet", "espnbet", "ballybet", "betparx", "williamhill_us",
+      "fliff", "rebet", "bovada", "betonlineag", "mybookieag", "betus",
+      "lowvig", "betanysports", "gtbets", "everygame",
+    ]);
     for (const g of freshGames) {
       if (Array.isArray(g.bookmakers)) {
-        g.bookmakers = g.bookmakers.filter(b => !STATE_SPECIFIC_BOOKS.has(b.key));
+        g.bookmakers = g.bookmakers
+          .filter(b => !STATE_SPECIFIC_BOOKS.has(b.key))
+          .map(b => ({ ...b, bettable: US_BETTABLE_BOOKS.has(b.key) }));
       }
     }
 

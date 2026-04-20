@@ -95,7 +95,7 @@ const collectMarketFairProbs = (game, marketType) => {
       if (!perOutcomeFair[key]) perOutcomeFair[key] = [];
       if (!perOutcomeOffers[key]) perOutcomeOffers[key] = [];
       perOutcomeFair[key].push(fair);
-      perOutcomeOffers[key].push({ ...o, book: book.title });
+      perOutcomeOffers[key].push({ ...o, book: book.title, bookKey: book.key, bettable: book.bettable !== false });
     });
   });
 
@@ -285,6 +285,9 @@ const findValueBets = (games, liveScores) => {
         const vigFreeProb = median(fairProbs);
 
         offers.forEach(outcome => {
+          // Don't recommend bets at books US users can't access — fair-value
+          // math above still uses the full set (Pinnacle etc.) as the anchor.
+          if (!outcome.bettable) return;
           const thisProb = impliedProb(outcome.price);
           const ev = calcEV(outcome.price, vigFreeProb);
           const edgePercent = ((vigFreeProb - thisProb) / thisProb * 100);
@@ -438,6 +441,7 @@ const findSharpPlays = (games, liveScores) => {
         const vigFreeProb = median(fairProbs);
 
         outcomes.forEach(outcome => {
+          if (!outcome.bettable) return;
           if (isExtremeOdds(outcome.price)) return;
           const thisProb = impliedProb(outcome.price);
           const ev = calcEV(outcome.price, vigFreeProb);
@@ -546,7 +550,7 @@ const findStaleLines = (games, liveScores) => {
         market.outcomes.forEach(outcome => {
           const key = `${outcome.name}_${outcome.point || ''}`;
           if (!allOutcomes[key]) allOutcomes[key] = [];
-          allOutcomes[key].push({ ...outcome, book: book.title });
+          allOutcomes[key].push({ ...outcome, book: book.title, bettable: book.bettable !== false });
         });
       });
 
@@ -557,6 +561,7 @@ const findStaleLines = (games, liveScores) => {
         const median = sorted[Math.floor(sorted.length / 2)];
 
         outcomes.forEach(outcome => {
+          if (!outcome.bettable) return;
           if (isExtremeOdds(outcome.price)) return;
           const diff = Math.abs(outcome.price - median);
           const booksAtMedian = prices.filter(p => Math.abs(p - median) < 10).length;
@@ -612,7 +617,7 @@ const findRLMPlays = (games, liveScores) => {
         market.outcomes.forEach(outcome => {
           const key = `${outcome.name}_${outcome.point || ''}`;
           if (!allOutcomes[key]) allOutcomes[key] = [];
-          allOutcomes[key].push({ ...outcome, book: book.title });
+          allOutcomes[key].push({ ...outcome, book: book.title, bettable: book.bettable !== false });
         });
       });
 
@@ -627,7 +632,9 @@ const findRLMPlays = (games, liveScores) => {
 
         // Find the side where sharp money may have moved (lower odds = more action)
         const sharpSide = outcomes.filter(o => o.price < median - 5);
-        const publicSide = outcomes.filter(o => o.price >= median);
+        // Only recommend at US-bettable books; sharp side can include any book
+        // since it's just signaling where the smart money went.
+        const publicSide = outcomes.filter(o => o.price >= median && o.bettable);
 
         if (sharpSide.length >= 1 && publicSide.length >= 2) {
           // Sharp books have lower odds (took action and adjusted)
@@ -673,6 +680,9 @@ const findCorrelatedParlays = (games, liveScores) => {
       game.bookmakers.forEach(book => {
         const market = book.markets.find(m => m.key === marketType);
         if (!market) return;
+        // Only pull prices from bettable books — correlated parlays are only
+        // useful if the user can actually place them.
+        if (book.bettable === false) return;
         market.outcomes.forEach(o => {
           const key = `${o.name}_${o.point || ''}`;
           if (!outcomes[key]) outcomes[key] = [];
@@ -855,9 +865,10 @@ const findNarrativePlays = (games, liveScores) => {
 
     if (!blowoutTeam || !blowoutInfo) return;
 
-    // Get the spread for the blowout team
+    // Get the spread for the blowout team — only recommend at bettable books.
     const spreadsData = {};
     game.bookmakers.forEach(book => {
+      if (book.bettable === false) return;
       const market = book.markets.find(m => m.key === "spreads");
       if (!market) return;
       market.outcomes.forEach(o => {

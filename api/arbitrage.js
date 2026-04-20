@@ -68,6 +68,15 @@ function pointLabel(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+// Books US users can actually bet at. Arbitrage only works when you can
+// stake both sides, so we strip Pinnacle/UK/EU books before computing.
+const US_BETTABLE_BOOKS = new Set([
+  "draftkings", "fanduel", "betmgm", "caesars", "betrivers", "fanatics",
+  "hardrockbet", "espnbet", "ballybet", "betparx", "williamhill_us",
+  "fliff", "rebet", "bovada", "betonlineag", "mybookieag", "betus",
+  "lowvig", "betanysports", "gtbets", "everygame",
+]);
+
 // ───────────────── computed arbs from The Odds API ─────────────────
 
 async function fetchOddsForSport(sport, apiKey, regions) {
@@ -95,9 +104,11 @@ function computeArbsForEvent(ev, sport) {
     source: "computed",
   };
 
+  const bookmakers = (ev.bookmakers || []).filter(b => US_BETTABLE_BOOKS.has(b.key));
+
   // ── h2h ──
   let bestHome = null, bestAway = null;
-  for (const b of ev.bookmakers || []) {
+  for (const b of bookmakers) {
     const m = (b.markets || []).find(x => x.key === "h2h");
     if (!m) continue;
     for (const o of m.outcomes || []) {
@@ -125,7 +136,7 @@ function computeArbsForEvent(ev, sport) {
 
   // ── totals: best Over vs best Under at each point ──
   const totalsByPt = {};
-  for (const b of ev.bookmakers || []) {
+  for (const b of bookmakers) {
     const m = (b.markets || []).find(x => x.key === "totals");
     if (!m) continue;
     for (const o of m.outcomes || []) {
@@ -156,7 +167,7 @@ function computeArbsForEvent(ev, sport) {
   // opposite sign = complementary outcomes). Iterate every point value
   // since home-fav and home-dog spread arbs are distinct bets.
   const byPt = {};
-  for (const b of ev.bookmakers || []) {
+  for (const b of bookmakers) {
     const m = (b.markets || []).find(x => x.key === "spreads");
     if (!m) continue;
     for (const o of m.outcomes || []) {

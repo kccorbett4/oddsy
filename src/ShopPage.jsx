@@ -176,6 +176,10 @@ function GameCard({ game, market }) {
   const outcomesMap = new Map(); // key "name|point" → { name, point, byBook: {book:price} }
 
   (game.bookmakers || []).forEach(bm => {
+    // Hide non-bettable books (Pinnacle, 1xBet etc.) — they sharpen the
+    // median in the scoring page, but on Shop the user is here to click
+    // through to a book they can actually deposit at.
+    if (bm.bettable === false) return;
     const m = (bm.markets || []).find(x => x.key === market);
     if (!m) return;
     booksInGame.add(bm.title);

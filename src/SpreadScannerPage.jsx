@@ -80,6 +80,9 @@ function buildMarkets(gameData, hrData) {
     // Group outcomes across books per (marketKey, outcome.name, outcome.point)
     const bucket = {};
     (g.bookmakers || []).forEach(book => {
+      // Non-bettable books (Pinnacle etc.) don't belong on a scanner meant
+      // for finding the best price you can actually play at.
+      if (book.bettable === false) return;
       (book.markets || []).forEach(m => {
         if (!["h2h", "spreads", "totals"].includes(m.key)) return;
         (m.outcomes || []).forEach(o => {
