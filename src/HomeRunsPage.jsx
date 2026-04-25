@@ -101,6 +101,45 @@ export default function HomeRunsPage() {
     return rankHrProjections(ctx, odds);
   }, [ctx, odds]);
 
+  // Daily auto-track of v1's top HR picks. Sends the top 5 by EV under
+  // strategy hr_v1_top so the resolver can settle them and we can finally
+  // measure v1 against v2 head-to-head. Throttled to one save per day per
+  // session via sessionStorage so a refresh doesn't double-save.
+  useEffect(() => {
+    if (!ctx || !odds || projections.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const sentKey = `hrV1Sent:${today}`;
+    if (sessionStorage.getItem(sentKey) === "1") return;
+    const top = [...projections]
+      .filter(p => p?.bestAmerican && p?.evPct > 0)
+      .sort((a, b) => b.evPct - a.evPct)
+      .slice(0, 5);
+    if (top.length === 0) return;
+    const picks = top.map(p => {
+      const game = ctx.games.find(g => g.home === p.game.home && g.away === p.game.away);
+      return {
+        strategy: "hr_v1_top",
+        gameId: game?.gameId || `${p.game.home}@${p.game.away}@${p.game.commence}`,
+        homeTeam: p.game.home,
+        awayTeam: p.game.away,
+        sportKey: "baseball_mlb",
+        commenceTime: p.game.commence,
+        marketType: "batter_home_runs",
+        outcome: p.name,
+        point: 0.5,
+        odds: p.bestAmerican,
+        book: p.bestBook || "",
+      };
+    });
+    fetch("/api/track-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ picks }),
+    }).then(() => {
+      try { sessionStorage.setItem(sentKey, "1"); } catch {}
+    }).catch(() => {});
+  }, [ctx, odds, projections]);
+
   const allBooks = useMemo(() => {
     const s = new Set();
     for (const p of projections) {
@@ -217,7 +256,15 @@ export default function HomeRunsPage() {
         color: "#fff", padding: "26px 20px 20px",
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h1 style={{ fontSize: 26, fontWeight: 900, margin: "0 0 6px" }}>💣 Home Run Hunter</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+            <h1 style={{ fontSize: 26, fontWeight: 900, margin: 0 }}>💣 Home Run Hunter</h1>
+            <Link to="/homeruns/v2" style={{
+              padding: "5px 10px", borderRadius: 999,
+              background: "#fbbf24", color: "#451a03",
+              textDecoration: "none", fontSize: 11, fontWeight: 800,
+              letterSpacing: "0.04em",
+            }}>Try v2.0 (BETA) →</Link>
+          </div>
           <p style={{ fontSize: 13, color: "#cbd5e1", margin: "0 0 12px", lineHeight: 1.55, maxWidth: 780 }}>
             Every MLB HR prop on the board, ranked by our edge against the best book price.
             Projections blend season Statcast, pitcher matchup quality, ballpark effects, and live

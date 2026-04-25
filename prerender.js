@@ -5,8 +5,24 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.resolve(__dirname, 'dist')
 
+// The Cloudflare Vite plugin hashes SSR output filenames into
+// dist/server/assets/entry-server-<hash>.js, while older builds dropped
+// the file at dist/server/entry-server.js. Resolve whichever exists so
+// prerender works with both build modes.
+function resolveSsrEntry() {
+  const flat = path.resolve(distDir, 'server/entry-server.js')
+  if (fs.existsSync(flat)) return flat
+  const assetsDir = path.resolve(distDir, 'server/assets')
+  if (fs.existsSync(assetsDir)) {
+    const match = fs.readdirSync(assetsDir).find(f => /^entry-server.*\.js$/.test(f))
+    if (match) return path.join(assetsDir, match)
+  }
+  throw new Error(`No entry-server build output found in ${distDir}/server`)
+}
+
 async function prerender() {
-  const { render, getAllPaths } = await import('./dist/server/entry-server.js')
+  const ssrPath = resolveSsrEntry()
+  const { render, getAllPaths } = await import(`file://${ssrPath}`)
   const template = fs.readFileSync(path.resolve(distDir, 'index.html'), 'utf-8')
 
   const routes = getAllPaths()

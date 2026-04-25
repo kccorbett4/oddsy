@@ -13,6 +13,7 @@ import StaleLineDetectorPage from './seo-pages/StaleLineDetectorPage.jsx'
 import NarrativeRegressionPage from './seo-pages/NarrativeRegressionPage.jsx'
 import ShopPage from './ShopPage.jsx'
 import HomeRunsPage from './HomeRunsPage.jsx'
+import HomeRunHunter2Page from './HomeRunHunter2Page.jsx'
 import HrParlaysPage from './HrParlaysPage.jsx'
 import ArbitragePage from './ArbitragePage.jsx'
 import PredictionMarketsPage from './PredictionMarketsPage.jsx'
@@ -44,6 +45,8 @@ export default function AppRoutes() {
       <Route path="/props/hr" element={<HomeRunsPage />} />
       <Route path="/props/parlays" element={<HrParlaysPage />} />
       <Route path="/homeruns" element={<HomeRunsPage />} />
+      <Route path="/homeruns/v2" element={<HomeRunHunter2Page />} />
+      <Route path="/props/hr/v2" element={<HomeRunHunter2Page />} />
       <Route path="/homeruns/parlays" element={<HrParlaysPage />} />
       {/* Parlays umbrella — HR parlays reachable from the primary Parlays tab. */}
       <Route path="/parlays/hr" element={<HrParlaysPage />} />

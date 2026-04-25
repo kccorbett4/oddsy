@@ -10,6 +10,78 @@ function unitsOnWin(oddsStr) {
   return odds > 0 ? odds / 100 : 100 / Math.abs(odds);
 }
 
+// Player-prop name match. Strips accents, periods, suffixes.
+function normalizePlayerName(s) {
+  return (s || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[.'`]/g, "")
+    .replace(/\s(jr|sr|ii|iii|iv)\.?$/i, "")
+    .replace(/[^a-z\s]/g, "")
+    .trim()
+    .split(/\s+/);
+}
+function playerNamesMatch(a, b) {
+  const A = normalizePlayerName(a); const B = normalizePlayerName(b);
+  if (!A.length || !B.length) return false;
+  if (A[A.length - 1] !== B[B.length - 1]) return false;
+  if (A[0][0] !== B[0][0]) return false;
+  return true;
+}
+
+// Fetch a MLB Stats API boxscore once per gameId, with in-memory cache for
+// the duration of this resolve run. Returns the count of HRs the named
+// player hit in that game, or null if the box hasn't posted / can't match.
+const __boxCache = new Map();
+async function batterHrCountFromMlbBox(gamePk, playerName) {
+  if (!gamePk) return null;
+  let box;
+  if (__boxCache.has(gamePk)) {
+    box = __boxCache.get(gamePk);
+  } else {
+    try {
+      const r = await fetch(`https://statsapi.mlb.com/api/v1/game/${gamePk}/boxscore`,
+        { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) { __boxCache.set(gamePk, null); return null; }
+      box = await r.json();
+      __boxCache.set(gamePk, box);
+    } catch { __boxCache.set(gamePk, null); return null; }
+  }
+  if (!box || !box.teams) return null;
+  for (const side of ["home", "away"]) {
+    const players = box.teams?.[side]?.players || {};
+    for (const p of Object.values(players)) {
+      const full = p?.person?.fullName;
+      if (!full) continue;
+      if (!playerNamesMatch(full, playerName)) continue;
+      const hr = parseInt(p?.stats?.batting?.homeRuns ?? "0", 10);
+      return Number.isFinite(hr) ? hr : 0;
+    }
+  }
+  return null; // player not found in box (didn't appear)
+}
+
+// Decide if MLB game is final. We use the schedule endpoint which includes
+// a `status.abstractGameState` field. Boxscore alone doesn't tell us if
+// the game is over — a game in progress will return partial stats and a
+// "won" flag would be premature.
+async function isMlbGameFinal(gamePk) {
+  if (!gamePk) return false;
+  try {
+    const r = await fetch(`https://statsapi.mlb.com/api/v1/schedule?gamePk=${gamePk}`,
+      { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return false;
+    const j = await r.json();
+    for (const d of (j?.dates || [])) {
+      for (const g of (d.games || [])) {
+        if (String(g.gamePk) !== String(gamePk)) continue;
+        return g.status?.abstractGameState === "Final";
+      }
+    }
+  } catch {}
+  return false;
+}
+
 // Normalize team names for matching across sources (ESPN vs The Odds API).
 const normalizeTeam = (s) =>
   (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
@@ -131,6 +203,61 @@ export default async function handler(req, res) {
       const pick = await client.hGetAll(`pick:${pickId}`);
       if (!pick || Object.keys(pick).length === 0 || pick.resolved === "true") {
         await client.zRem("pending_picks", pickId);
+        continue;
+      }
+
+      // ────────────────────── Player props (HR) ──────────────────────
+      // Player-prop markets don't resolve from team box-final scores —
+      // we look up the named batter's HR count in the MLB Stats API
+      // boxscore. Anytime-HR is the only line we currently track:
+      // win = ≥1 HR, loss = 0 HR, no push.
+      if (pick.marketType === "batter_home_runs"
+          || pick.marketType === "player_home_runs") {
+        const final = await isMlbGameFinal(pick.gameId);
+        if (!final) {
+          const gameTime = new Date(pick.commenceTime).getTime();
+          if (now - gameTime > 48 * 3600000) {
+            await client.zRem("pending_picks", pickId);
+            await client.hSet(`pick:${pickId}`, { resolved: "true", result: "expired" });
+          }
+          continue;
+        }
+        const hrCount = await batterHrCountFromMlbBox(pick.gameId, pick.outcome);
+        if (hrCount === null) {
+          // Player didn't appear in the box (DNP, scratched). Treat as
+          // loss for over 0.5 — the prop pays only if the bat hits one.
+          const gameTime = new Date(pick.commenceTime).getTime();
+          if (now - gameTime < 48 * 3600000) continue;
+          await client.zRem("pending_picks", pickId);
+          await client.hSet(`pick:${pickId}`, { resolved: "true", result: "expired" });
+          continue;
+        }
+        const result = hrCount >= 1 ? "win" : "loss";
+        const unitProfit = result === "win" ? unitsOnWin(pick.odds) : -1;
+
+        await client.hSet(`pick:${pickId}`, {
+          resolved: "true",
+          result,
+          finalHr: String(hrCount),
+          resolvedAt: new Date().toISOString(),
+          unitProfit: unitProfit.toFixed(4),
+        });
+
+        const userId = pick.userId || null;
+        const sKey = statsKey(pick.strategy, userId);
+        await client.hIncrBy(sKey, "total", 1);
+        await client.hIncrBy(sKey, result === "win" ? "wins" : "losses", 1);
+        await client.hIncrByFloat(sKey, "units", unitProfit);
+
+        const dailyKey = `${sKey}:${pick.date}`;
+        await client.hIncrBy(dailyKey, "total", 1);
+        await client.hIncrBy(dailyKey, result === "win" ? "wins" : "losses", 1);
+        await client.hIncrByFloat(dailyKey, "units", unitProfit);
+        await client.expire(dailyKey, 90 * 86400);
+
+        await client.zRem("pending_picks", pickId);
+        resolved++;
+        if (result === "win") wins++; else losses++;
         continue;
       }
 
